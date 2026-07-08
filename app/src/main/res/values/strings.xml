@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OrientVibe</string>
+    <string name="camera_button">Сфотографировать карту</string>
+    <string name="gallery_button">Загрузить из галереи</string>
+    <string name="map_placeholder">Карта не загружена</string>
+</resources>
