@@ -53,4 +53,13 @@ dependencies {
     
     // Activity result API
     implementation("androidx.activity:activity-ktx:1.10.1")
+    
+    // OpenCV for image processing
+    implementation("org.opencv:opencv:4.13.0")
+    
+    // Coroutines for background tasks
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    
+    // ONNX Runtime for object detection
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.17.0")
 }

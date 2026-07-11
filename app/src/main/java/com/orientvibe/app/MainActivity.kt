@@ -1,120 +1,160 @@
 package com.orientvibe.app
 
-import android.Manifest
-import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.RectF
+import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.orientvibe.app.databinding.ActivityMainBinding
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
-
-    // Camera permission launcher
-    private val cameraPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        if (isGranted) {
-            // Permission granted, launch camera
-            launchCamera()
-        } else {
-            Toast.makeText(this, "Разрешение на камеру отклонено", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    // Gallery permission launcher
-    private val galleryPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        if (isGranted) {
-            // Permission granted, launch gallery
-            launchGallery()
-        } else {
-            Toast.makeText(this, "Разрешение на галерею отклонено", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    // Camera result launcher
-    private val cameraLauncher = registerForActivityResult(
-        CameraContract()
-    ) { uri ->
-        uri?.let {
-            binding.mapImageView.setImageURI(it)
-            Toast.makeText(this, "Фото сохранено", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    // Gallery result launcher
-    private val galleryLauncher = registerForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri ->
-        uri?.let {
-            binding.mapImageView.setImageURI(it)
-            Toast.makeText(this, "Карта загружена", Toast.LENGTH_SHORT).show()
-        }
-    }
+    private lateinit var cameraManager: CameraManager
+    private lateinit var galleryManager: GalleryManager
+    private val objectDetector = OnnxObjectDetector(this)
+    private var modelLoaded = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        // Load ONNX model
+        modelLoaded = objectDetector.loadModel("yolov8n.onnx")
+        if (!modelLoaded) {
+            Toast.makeText(this, "Не удалось загрузить модель", Toast.LENGTH_LONG).show()
+        }
+
+        setupManagers()
         setupButtons()
+    }
+
+    private fun setupManagers() {
+        cameraManager = CameraManager(this) { uri ->
+            processImage(uri)
+        }
+        cameraManager.setupLaunchers()
+
+        galleryManager = GalleryManager(this) { uri ->
+            processImage(uri)
+        }
+        galleryManager.setupLaunchers()
     }
 
     private fun setupButtons() {
         binding.cameraButton.setOnClickListener {
-            checkCameraPermissionAndLaunch()
+            cameraManager.requestCamera()
         }
 
         binding.galleryButton.setOnClickListener {
-            checkGalleryPermissionAndLaunch()
+            galleryManager.requestGallery()
         }
     }
 
-    private fun checkCameraPermissionAndLaunch() {
-        when {
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.CAMERA
-            ) == PackageManager.PERMISSION_GRANTED -> {
-                launchCamera()
+    private fun processImage(uri: Uri) {
+        if (!modelLoaded) {
+            Toast.makeText(this, "Модель не загружена", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        try {
+            // Load bitmap from URI
+            val inputStream = contentResolver.openInputStream(uri)
+            val bitmap = BitmapFactory.decodeStream(inputStream)
+            inputStream?.close()
+
+            if (bitmap != null) {
+                // Show original image first
+                binding.mapImageView.setImageBitmap(bitmap)
+
+                // Detect control points in background
+                lifecycleScope.launch {
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Анализ карты...",
+                        Toast.LENGTH_SHORT
+                    ).show()
+
+                    val detections = objectDetector.detect(bitmap)
+                    val annotatedBitmap = drawDetections(bitmap, detections)
+
+                    // Update UI with annotated image
+                    binding.mapImageView.setImageBitmap(annotatedBitmap)
+
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Найдено ${detections.size} контрольных пунктов",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            } else {
+                Toast.makeText(this, "Ошибка загрузки изображения", Toast.LENGTH_SHORT).show()
             }
-            else -> {
-                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-            }
+        } catch (e: Exception) {
+            Toast.makeText(this, "Ошибка: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
-    private fun checkGalleryPermissionAndLaunch() {
-        val permission = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            Manifest.permission.READ_MEDIA_IMAGES
-        } else {
-            Manifest.permission.READ_EXTERNAL_STORAGE
+    private fun drawDetections(bitmap: Bitmap, detections: List<DetectionResult>): Bitmap {
+        val mutableBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
+        val canvas = Canvas(mutableBitmap)
+        
+        val paint = Paint().apply {
+            color = Color.GREEN
+            style = Paint.Style.STROKE
+            strokeWidth = 5f
         }
-
-        when {
-            ContextCompat.checkSelfPermission(
-                this,
-                permission
-            ) == PackageManager.PERMISSION_GRANTED -> {
-                launchGallery()
-            }
-            else -> {
-                galleryPermissionLauncher.launch(permission)
-            }
+        
+        val textPaint = Paint().apply {
+            color = Color.WHITE
+            textSize = 40f
+            style = Paint.Style.FILL
         }
+        
+        val textBackgroundPaint = Paint().apply {
+            color = Color.BLACK
+            style = Paint.Style.FILL
+        }
+        
+        for (detection in detections) {
+            // Draw bounding box
+            canvas.drawRect(detection.boundingBox, paint)
+            
+            // Draw confidence score
+            val confidenceText = String.format("%.2f", detection.confidence)
+            val textWidth = textPaint.measureText(confidenceText)
+            val textHeight = textPaint.textSize
+            
+            canvas.drawRect(
+                detection.boundingBox.left,
+                detection.boundingBox.top - textHeight - 10f,
+                detection.boundingBox.left + textWidth + 10f,
+                detection.boundingBox.top,
+                textBackgroundPaint
+            )
+            
+            canvas.drawText(
+                confidenceText,
+                detection.boundingBox.left + 5f,
+                detection.boundingBox.top - 5f,
+                textPaint
+            )
+        }
+        
+        return mutableBitmap
     }
 
-    private fun launchCamera() {
-        cameraLauncher.launch(null)
-    }
-
-    private fun launchGallery() {
-        galleryLauncher.launch("image/*")
+    override fun onDestroy() {
+        super.onDestroy()
+        objectDetector.close()
     }
 }
