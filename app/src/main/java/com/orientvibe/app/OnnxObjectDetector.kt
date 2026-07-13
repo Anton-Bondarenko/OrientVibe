@@ -6,6 +6,8 @@ import android.graphics.RectF
 import android.util.Log
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
+import ai.onnxruntime.OrtException
+import ai.onnxruntime.OnnxTensor
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
@@ -34,7 +36,7 @@ class OnnxObjectDetector(private val context: Context) {
             
             // Create ONNX session
             val sessionOptions = OrtSession.SessionOptions().apply {
-                setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+                setExecutionMode(OrtSession.SessionOptions.ExecutionMode.SEQUENTIAL)
             }
             ortSession = ortEnvironment.createSession(tempFile.absolutePath, sessionOptions)
             
@@ -73,28 +75,122 @@ class OnnxObjectDetector(private val context: Context) {
             // Preprocess image
             val inputBuffer = preprocessImage(bitmap)
             
-            // Prepare input tensor
+            // Get input info from session first to understand expected format
             val inputName = session.inputNames?.iterator()?.next()
-            val inputShape = longArrayOf(1, 3, inputImageHeight.toLong(), inputImageWidth.toLong())
-            val inputTensor = ortEnvironment.createTensor(
-                inputShape,
-                inputBuffer
-            )
+            val inputInfo = session.inputInfo[inputName]
+            val modelInputShape = try {
+                (inputInfo?.info as? ai.onnxruntime.TensorInfo)?.shape
+            } catch (e: Exception) {
+                Log.w(tag, "Could not get input shape from info, using default", e)
+                longArrayOf(1, 3, inputImageHeight.toLong(), inputImageWidth.toLong())
+            }
+            Log.d(tag, "Input info shape: ${modelInputShape?.contentToString()}")
+            
+            // Calculate expected size from actual model input shape (number of float elements)
+            val expectedSize = modelInputShape?.reduce { a, b -> a * b }?.toInt() ?: (1 * 3 * inputImageHeight * inputImageWidth)
+            Log.d(tag, "Expected size from model: $expectedSize, Input buffer capacity: ${inputBuffer.capacity()}")
+            
+            // Ensure input buffer has correct size
+            inputBuffer.rewind()
+            if (inputBuffer.capacity() != expectedSize) {
+                Log.e(tag, "Buffer size mismatch! Expected: $expectedSize, Got: ${inputBuffer.capacity()}")
+                throw IllegalArgumentException("Buffer size mismatch: expected $expectedSize, got ${inputBuffer.capacity()}")
+            }
+            
+            // Create tensor using ortEnvironment with FloatBuffer and shape
+            val inputShape = modelInputShape ?: longArrayOf(1, 3, inputImageHeight.toLong(), inputImageWidth.toLong())
+            val inputTensor = OnnxTensor.createTensor(ortEnvironment, inputBuffer, inputShape)
             
             // Run inference
             val inputs = mapOf(inputName to inputTensor)
             val outputs = session.run(inputs)
             
-            // Get output tensor
-            val outputTensor = outputs[0]
-            val outputBuffer = outputTensor.floatBuffer
+            // Get output - use getValue() with array handling
+            val output = outputs[0]
+            val outputBuffer = try {
+                // Get output info to understand the shape and type
+                val outputInfo = output.info
+                Log.d(tag, "Output info: $outputInfo")
+                
+                val outputValue = output.getValue()
+                when (outputValue) {
+                    is FloatBuffer -> outputValue
+                    is ByteBuffer -> {
+                        val fb = ByteBuffer.allocateDirect(outputValue.remaining() / 4)
+                        outputValue.rewind()
+                        while (outputValue.hasRemaining()) {
+                            fb.putFloat(outputValue.getFloat())
+                        }
+                        fb.rewind()
+                        fb.asFloatBuffer()
+                    }
+                    is Array<*> -> {
+                        Log.d(tag, "Output is array type: ${outputValue.javaClass}")
+                        // [[[F structure: Array<Array<FloatArray>>
+                        // Shape: [1, 6, 8400] where 6 = 4 bbox + 2 classes, 8400 = detections
+                        // We need to flatten as: [det0_val0, det0_val1, ..., det0_val5, det1_val0, ...]
+                        // This means: iterate over values (6), then detections (8400)
+                        val outputShape = try {
+                            (ortSession?.outputInfo?.values?.first()?.info as? ai.onnxruntime.TensorInfo)?.shape
+                        } catch (e: Exception) {
+                            Log.w(tag, "Could not get output shape from info, using default", e)
+                            longArrayOf(1, 6, 8400) // Default for custom model with 2 classes
+                        }
+                        val numValues = outputShape?.getOrNull(1)?.toInt() ?: 6
+                        val numDetections = outputShape?.getOrNull(2)?.toInt() ?: 8400
+                        val expectedSize = 1 * numValues * numDetections
+                        Log.d(tag, "Expected buffer size: $expectedSize (1 x $numValues x $numDetections)")
+                        
+                        val byteBuffer = ByteBuffer.allocateDirect(expectedSize * 4)
+                        byteBuffer.order(ByteOrder.nativeOrder())
+                        
+                        // [[[F = Array<Array<FloatArray>>
+                        // Structure: batch[0] = Array<FloatArray> of size 6 (values)
+                        // Each FloatArray has size 8400 (detections)
+                        // We need: [det0_val0, det0_val1, ..., det0_val5, det1_val0, ...]
+                        // So: for each detection (0..8399), for each value (0..5)
+                        var index = 0
+                        val batchArray = outputValue as Array<Array<FloatArray>>
+                        Log.d(tag, "Batch array size: ${batchArray.size}")
+                        if (batchArray.isNotEmpty()) {
+                            val valuesArray = batchArray[0]
+                            Log.d(tag, "Values array size: ${valuesArray.size}")
+                            if (valuesArray.isNotEmpty()) {
+                                val detectionSize = valuesArray[0].size
+                                Log.d(tag, "Detection array size: $detectionSize")
+                                
+                                // Iterate over detections first (8400), then values (6)
+                                for (detIdx in 0 until detectionSize) {
+                                    for (valIdx in 0 until valuesArray.size) {
+                                        if (index < expectedSize) {
+                                            byteBuffer.putFloat(index * 4, valuesArray[valIdx][detIdx])
+                                            index++
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        Log.d(tag, "Copied $index elements to buffer")
+                        byteBuffer.rewind()
+                        byteBuffer.asFloatBuffer()
+                    }
+                    else -> {
+                        Log.e(tag, "Unsupported output type: ${outputValue.javaClass}")
+                        throw IllegalArgumentException("Unsupported output type: ${outputValue.javaClass}")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(tag, "Error processing output", e)
+                throw e
+            }
             
             // Postprocess results
             val results = postprocessResults(outputBuffer, bitmap.width, bitmap.height)
             
             // Clean up
             inputTensor.close()
-            outputTensor.close()
+            output.close()
             outputs.close()
             
             results
@@ -105,33 +201,62 @@ class OnnxObjectDetector(private val context: Context) {
     }
     
     private fun preprocessImage(bitmap: Bitmap): FloatBuffer {
-        // Resize bitmap to input size
-        val resizedBitmap = Bitmap.createScaledBitmap(bitmap, inputImageWidth, inputImageHeight, true)
+        // Calculate letterbox dimensions to preserve aspect ratio
+        val originalWidth = bitmap.width
+        val originalHeight = bitmap.height
+        val scale = minOf(inputImageWidth.toFloat() / originalWidth, inputImageHeight.toFloat() / originalHeight)
+        val newWidth = (originalWidth * scale).toInt()
+        val newHeight = (originalHeight * scale).toInt()
         
-        // Prepare buffer (NCHW format: batch, channels, height, width)
-        val buffer = FloatBuffer.allocate(3 * inputImageHeight * inputImageWidth)
-        buffer.order(ByteOrder.nativeOrder())
+        // Resize with letterbox (preserve aspect ratio)
+        val resizedBitmap = Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
+        
+        // Create letterbox bitmap with padding
+        val letterboxBitmap = Bitmap.createBitmap(inputImageWidth, inputImageHeight, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(letterboxBitmap)
+        canvas.drawColor(android.graphics.Color.BLACK) // Padding color
+        val offsetX = (inputImageWidth - newWidth) / 2
+        val offsetY = (inputImageHeight - newHeight) / 2
+        canvas.drawBitmap(resizedBitmap, offsetX.toFloat(), offsetY.toFloat(), null)
+        
+        // Prepare buffer (NCHW format: batch, channels, height, width) - matches model input [1, 3, 640, 640]
+        val expectedSize = 1 * 3 * inputImageHeight * inputImageWidth
+        val buffer = FloatBuffer.allocate(expectedSize)
+        Log.d(tag, "Preprocess: Original: ${originalWidth}x${originalHeight}, Resized: ${newWidth}x${newHeight}, Letterbox: ${inputImageWidth}x${inputImageHeight}, Scale: $scale")
         
         // Convert bitmap to float array with normalization [0, 1]
         val pixels = IntArray(inputImageWidth * inputImageHeight)
-        resizedBitmap.getPixels(pixels, 0, inputImageWidth, 0, 0, inputImageWidth, inputImageHeight)
+        letterboxBitmap.getPixels(pixels, 0, inputImageWidth, 0, 0, inputImageWidth, inputImageHeight)
         
+        // NCHW format: first all reds, then all greens, then all blues
         for (y in 0 until inputImageHeight) {
             for (x in 0 until inputImageWidth) {
                 val pixel = pixels[y * inputImageWidth + x]
                 val r = ((pixel shr 16) and 0xFF) / 255.0f
+                buffer.put(r)
+            }
+        }
+        
+        for (y in 0 until inputImageHeight) {
+            for (x in 0 until inputImageWidth) {
+                val pixel = pixels[y * inputImageWidth + x]
                 val g = ((pixel shr 8) and 0xFF) / 255.0f
+                buffer.put(g)
+            }
+        }
+        
+        for (y in 0 until inputImageHeight) {
+            for (x in 0 until inputImageWidth) {
+                val pixel = pixels[y * inputImageWidth + x]
                 val b = (pixel and 0xFF) / 255.0f
-                
-                // NCHW format
-                buffer.put(r)  // Channel 0 (Red)
-                buffer.put(g)  // Channel 1 (Green)
-                buffer.put(b)  // Channel 2 (Blue)
+                buffer.put(b)
             }
         }
         
         resizedBitmap.recycle()
+        letterboxBitmap.recycle()
         buffer.rewind()
+        Log.d(tag, "Preprocess: Buffer position: ${buffer.position()}, Buffer remaining: ${buffer.remaining()}")
         
         return buffer
     }
@@ -144,47 +269,83 @@ class OnnxObjectDetector(private val context: Context) {
         outputBuffer.rewind()
         
         val results = mutableListOf<DetectionResult>()
-        val confidenceThreshold = 0.5f
+        val confidenceThreshold = 0.2f  // Optimized for better detection recall
         
         // YOLOv8 output format: [1, 84, 8400] where 84 = 4 (bbox) + 80 (classes) for COCO
-        // For custom model with 1 class: [1, 5, 8400] where 5 = 4 (bbox) + 1 (class)
+        // For custom model with 2 classes: [1, 6, 8400] where 6 = 4 (bbox) + 2 (classes: control_point, number)
         
         // Get output shape from session
-        val outputShape = ortSession?.outputInfo?.values?.first()?.info?.shape
-        val numDetections = outputShape?.get(2)?.toInt() ?: 8400
-        val numValues = outputShape?.get(1)?.toInt() ?: 5
+        val outputShape = try {
+            (ortSession?.outputInfo?.values?.first()?.info as? ai.onnxruntime.TensorInfo)?.shape
+        } catch (e: Exception) {
+            Log.w(tag, "Could not get output shape from info, using default", e)
+            longArrayOf(1, 5, 8400)
+        }
+        val numDetections = outputShape?.getOrNull(2)?.toInt() ?: 8400
+        val numValues = outputShape?.getOrNull(1)?.toInt() ?: 5
         
-        // Scale factors for converting back to original image size
-        val scaleX = originalWidth.toFloat() / inputImageWidth
-        val scaleY = originalHeight.toFloat() / inputImageHeight
+        // Calculate letterbox scale and offset (same as in preprocessing)
+        val scale = minOf(inputImageWidth.toFloat() / originalWidth, inputImageHeight.toFloat() / originalHeight)
+        val newWidth = (originalWidth * scale).toInt()
+        val newHeight = (originalHeight * scale).toInt()
+        val offsetX = (inputImageWidth - newWidth) / 2f
+        val offsetY = (inputImageHeight - newHeight) / 2f
         
+        Log.d(tag, "Postprocess: Original: ${originalWidth}x${originalHeight}, Scale: $scale, Offset: ($offsetX, $offsetY)")
+        Log.d(tag, "Buffer capacity: ${outputBuffer.capacity()}, numDetections: $numDetections, numValues: $numValues")
+        
+        var detectionsAboveThreshold = 0
         for (i in 0 until numDetections) {
-            val confidenceIndex = i * numValues + 4
+            // Find max confidence across all classes
+            var maxConfidence = 0f
+            var maxClassId = 0
             
-            if (confidenceIndex < outputBuffer.remaining()) {
-                val confidence = outputBuffer.get(confidenceIndex)
-                
-                if (confidence > confidenceThreshold) {
-                    // YOLO format: center_x, center_y, width, height
-                    val centerX = outputBuffer.get(i * numValues)
-                    val centerY = outputBuffer.get(i * numValues + 1)
-                    val width = outputBuffer.get(i * numValues + 2)
-                    val height = outputBuffer.get(i * numValues + 3)
-                    
-                    // Convert to top-left coordinates and scale to original image
-                    val left = (centerX - width / 2) * scaleX
-                    val top = (centerY - height / 2) * scaleY
-                    val right = (centerX + width / 2) * scaleX
-                    val bottom = (centerY + height / 2) * scaleY
-                    
-                    val boundingBox = RectF(left, top, right, bottom)
-                    results.add(DetectionResult(boundingBox, confidence, 0))
+            for (classId in 4 until numValues) {
+                val classIndex = i * numValues + classId
+                if (classIndex < outputBuffer.remaining()) {
+                    val classConfidence = outputBuffer.get(classIndex)
+                    if (classConfidence > maxConfidence) {
+                        maxConfidence = classConfidence
+                        maxClassId = classId - 4
+                    }
                 }
+            }
+            
+            if (maxConfidence > confidenceThreshold) {
+                detectionsAboveThreshold++
+                // YOLO format: center_x, center_y, width, height (in letterbox coordinates)
+                val centerX = outputBuffer.get(i * numValues)
+                val centerY = outputBuffer.get(i * numValues + 1)
+                val width = outputBuffer.get(i * numValues + 2)
+                val height = outputBuffer.get(i * numValues + 3)
+                
+                // Remove letterbox offset
+                val centerXOriginal = (centerX - offsetX) / scale
+                val centerYOriginal = (centerY - offsetY) / scale
+                val widthOriginal = width / scale
+                val heightOriginal = height / scale
+                
+                // Convert to top-left coordinates
+                val left = centerXOriginal - widthOriginal / 2
+                val top = centerYOriginal - heightOriginal / 2
+                val right = centerXOriginal + widthOriginal / 2
+                val bottom = centerYOriginal + heightOriginal / 2
+                
+                // Clamp to original image bounds
+                val clampedLeft = left.coerceIn(0f, originalWidth.toFloat())
+                val clampedTop = top.coerceIn(0f, originalHeight.toFloat())
+                val clampedRight = right.coerceIn(0f, originalWidth.toFloat())
+                val clampedBottom = bottom.coerceIn(0f, originalHeight.toFloat())
+                
+                val boundingBox = RectF(clampedLeft, clampedTop, clampedRight, clampedBottom)
+                results.add(DetectionResult(boundingBox, maxConfidence, maxClassId))
             }
         }
         
-        // Apply Non-Maximum Suppression (NMS)
-        return applyNMS(results, 0.45f)
+        Log.d(tag, "Detections above threshold: $detectionsAboveThreshold")
+        
+        // Apply Non-Maximum Suppression (NMS) with optimized IoU threshold
+        return applyNMS(results, 0.7f)
     }
     
     private fun applyNMS(results: List<DetectionResult>, iouThreshold: Float): List<DetectionResult> {
@@ -227,6 +388,49 @@ class OnnxObjectDetector(private val context: Context) {
         val unionArea = box1Area + box2Area - intersectionArea
         
         return intersectionArea / unionArea
+    }
+    
+    private fun copyArrayToBuffer(array: Any, buffer: ByteBuffer, offset: Int): Int {
+        return when (array) {
+            is FloatArray -> {
+                for (i in array.indices) {
+                    buffer.putFloat(offset * 4 + i * 4, array[i])
+                }
+                array.size
+            }
+            is Array<*> -> {
+                var currentOffset = offset
+                for (element in array) {
+                    if (element != null) {
+                        val size = copyArrayToBuffer(element, buffer, currentOffset)
+                        currentOffset += size
+                    }
+                }
+                currentOffset - offset
+            }
+            else -> {
+                Log.w(tag, "Unsupported array element type: ${array.javaClass}")
+                0
+            }
+        }
+    }
+    
+    private fun flattenArray(array: Any, flatList: MutableList<Float>) {
+        when (array) {
+            is FloatArray -> {
+                array.forEach { flatList.add(it) }
+            }
+            is Array<*> -> {
+                for (element in array) {
+                    if (element != null) {
+                        flattenArray(element, flatList)
+                    }
+                }
+            }
+            else -> {
+                Log.w(tag, "Unsupported array element type: ${array.javaClass}")
+            }
+        }
     }
     
     fun close() {
