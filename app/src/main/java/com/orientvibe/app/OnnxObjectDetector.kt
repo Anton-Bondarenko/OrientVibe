@@ -20,7 +20,17 @@ data class DetectionResult(
     val classId: Int
 )
 
+interface DetectionProgressListener {
+    fun onProgressUpdate(current: Int, total: Int, message: String)
+}
+
 class OnnxObjectDetector(private val context: Context) {
+    
+    private var progressListener: DetectionProgressListener? = null
+    
+    fun setProgressListener(listener: DetectionProgressListener?) {
+        this.progressListener = listener
+    }
     
     private val tag = "OnnxObjectDetector"
     private var ortSession: OrtSession? = null
@@ -71,6 +81,98 @@ class OnnxObjectDetector(private val context: Context) {
             return emptyList()
         }
         
+        return try {
+            // Use sliced inference for better detection on high-resolution images
+            detectWithSlicing(bitmap, session)
+        } catch (e: Exception) {
+            Log.e(tag, "Error during detection", e)
+            emptyList()
+        }
+    }
+    
+    private fun detectWithSlicing(bitmap: Bitmap, session: OrtSession): List<DetectionResult> {
+        val originalWidth = bitmap.width
+        val originalHeight = bitmap.height
+        
+        Log.d(tag, "Sliced inference: Original image ${originalWidth}x${originalHeight}")
+        
+        // Slicing parameters
+        val sliceSize = 640
+        val overlapRatio = 0.2f
+        val overlap = (sliceSize * overlapRatio).toInt()
+        val step = sliceSize - overlap
+        
+        // Calculate number of slices
+        val numSlicesX = kotlin.math.ceil(originalWidth.toDouble() / step).toInt()
+        val numSlicesY = kotlin.math.ceil(originalHeight.toDouble() / step).toInt()
+        val totalSlices = numSlicesX * numSlicesY
+        
+        Log.d(tag, "Slicing: ${numSlicesX}x${numSlicesY} = $totalSlices slices, step=$step, overlap=$overlap")
+        
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            progressListener?.onProgressUpdate(0, totalSlices, "Подготовка нарезки...")
+        }
+        
+        val allDetections = mutableListOf<DetectionResult>()
+        var processedSlices = 0
+        
+        // Process each slice
+        for (y in 0 until numSlicesY) {
+            for (x in 0 until numSlicesX) {
+                val sliceX1 = (x * step).coerceAtMost(originalWidth - sliceSize)
+                val sliceY1 = (y * step).coerceAtMost(originalHeight - sliceSize)
+                val sliceX2 = (sliceX1 + sliceSize).coerceAtMost(originalWidth)
+                val sliceY2 = (sliceY1 + sliceSize).coerceAtMost(originalHeight)
+                
+                // Skip if slice is too small
+                if (sliceX2 - sliceX1 < 100 || sliceY2 - sliceY1 < 100) {
+                    continue
+                }
+                
+                // Extract slice
+                val sliceWidth = sliceX2 - sliceX1
+                val sliceHeight = sliceY2 - sliceY1
+                val sliceBitmap = Bitmap.createBitmap(bitmap, sliceX1, sliceY1, sliceWidth, sliceHeight)
+                
+                // Update progress
+                processedSlices++
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    progressListener?.onProgressUpdate(processedSlices, totalSlices, "Анализ фрагмента $processedSlices из $totalSlices")
+                }
+                
+                // Run inference on slice
+                val sliceDetections = detectSingleImage(sliceBitmap, session)
+                
+                // Adjust coordinates to original image
+                val adjustedDetections = sliceDetections.map { det ->
+                    val adjustedBox = RectF(
+                        det.boundingBox.left + sliceX1,
+                        det.boundingBox.top + sliceY1,
+                        det.boundingBox.right + sliceX1,
+                        det.boundingBox.bottom + sliceY1
+                    )
+                    DetectionResult(adjustedBox, det.confidence, det.classId)
+                }
+                
+                allDetections.addAll(adjustedDetections)
+                
+                // Clean up
+                sliceBitmap.recycle()
+            }
+        }
+        
+        Log.d(tag, "Total detections from all slices: ${allDetections.size}")
+        
+        progressListener?.onProgressUpdate(totalSlices, totalSlices, "Объединение результатов...")
+        
+        // Apply NMS with merging to combine overlapping detections from slicing
+        val finalDetections = applyNMSWithMerging(allDetections, 0.7f)
+        Log.d(tag, "After NMS with merging: ${finalDetections.size} detections")
+        
+        return finalDetections
+    }
+    
+    private fun detectSingleImage(bitmap: Bitmap, session: OrtSession): List<DetectionResult> {
         return try {
             // Preprocess image
             val inputBuffer = preprocessImage(bitmap)
@@ -195,7 +297,7 @@ class OnnxObjectDetector(private val context: Context) {
             
             results
         } catch (e: Exception) {
-            Log.e(tag, "Error during detection", e)
+            Log.e(tag, "Error during single image detection", e)
             emptyList()
         }
     }
@@ -269,7 +371,7 @@ class OnnxObjectDetector(private val context: Context) {
         outputBuffer.rewind()
         
         val results = mutableListOf<DetectionResult>()
-        val confidenceThreshold = 0.2f  // Optimized for better detection recall
+        val confidenceThreshold = 0.5f
         
         // YOLOv8 output format: [1, 84, 8400] where 84 = 4 (bbox) + 80 (classes) for COCO
         // For custom model with 2 classes: [1, 6, 8400] where 6 = 4 (bbox) + 2 (classes: control_point, number)
@@ -344,8 +446,8 @@ class OnnxObjectDetector(private val context: Context) {
         
         Log.d(tag, "Detections above threshold: $detectionsAboveThreshold")
         
-        // Apply Non-Maximum Suppression (NMS) with optimized IoU threshold
-        return applyNMS(results, 0.7f)
+        // Apply Non-Maximum Suppression (NMS)
+        return applyNMS(results, 0.45f)
     }
     
     private fun applyNMS(results: List<DetectionResult>, iouThreshold: Float): List<DetectionResult> {
@@ -370,6 +472,115 @@ class OnnxObjectDetector(private val context: Context) {
         }
         
         return selected
+    }
+    
+    private fun applyNMSWithMerging(results: List<DetectionResult>, iouThreshold: Float): List<DetectionResult> {
+        if (results.isEmpty()) return results
+        
+        // Sort by confidence (descending)
+        val sorted = results.sortedByDescending { it.confidence }
+        val merged = mutableListOf<DetectionResult>()
+        val used = BooleanArray(sorted.size) { false }
+        
+        for (i in sorted.indices) {
+            if (used[i]) continue
+            
+            val current = sorted[i]
+            val overlapping = mutableListOf<DetectionResult>()
+            overlapping.add(current)
+            used[i] = true
+            
+            // Find all overlapping detections
+            for (j in (i + 1) until sorted.size) {
+                if (used[j]) continue
+                
+                val candidate = sorted[j]
+                val iou = calculateIoU(current.boundingBox, candidate.boundingBox)
+                
+                // Check if same class and either high IoU, one box is inside another, 3 sides match, or corner matches
+                if (current.classId == candidate.classId) {
+                    if (iou > iouThreshold || 
+                        isBoxInside(current.boundingBox, candidate.boundingBox) ||
+                        isBoxInside(candidate.boundingBox, current.boundingBox) ||
+                        hasThreeSidesMatching(current.boundingBox, candidate.boundingBox) ||
+                        hasCornerMatching(current.boundingBox, candidate.boundingBox)) {
+                        overlapping.add(candidate)
+                        used[j] = true
+                    }
+                }
+            }
+            
+            // Merge overlapping detections
+            if (overlapping.size > 1) {
+                val mergedDetection = mergeDetections(overlapping)
+                merged.add(mergedDetection)
+            } else {
+                merged.add(current)
+            }
+        }
+        
+        return merged
+    }
+    
+    private fun isBoxInside(inner: RectF, outer: RectF): Boolean {
+        return inner.left >= outer.left && 
+               inner.top >= outer.top && 
+               inner.right <= outer.right && 
+               inner.bottom <= outer.bottom
+    }
+    
+    private fun hasThreeSidesMatching(box1: RectF, box2: RectF): Boolean {
+        val tolerance = 10f // pixels tolerance for side matching
+        var matchingSides = 0
+        
+        // Check left sides
+        if (kotlin.math.abs(box1.left - box2.left) < tolerance) matchingSides++
+        // Check right sides
+        if (kotlin.math.abs(box1.right - box2.right) < tolerance) matchingSides++
+        // Check top sides
+        if (kotlin.math.abs(box1.top - box2.top) < tolerance) matchingSides++
+        // Check bottom sides
+        if (kotlin.math.abs(box1.bottom - box2.bottom) < tolerance) matchingSides++
+        
+        return matchingSides >= 3
+    }
+    
+    private fun hasCornerMatching(box1: RectF, box2: RectF): Boolean {
+        val tolerance = 10f // pixels tolerance for corner matching
+        
+        // Check if any corner coordinates match
+        val topLeftMatch = kotlin.math.abs(box1.left - box2.left) < tolerance && 
+                          kotlin.math.abs(box1.top - box2.top) < tolerance
+        val topRightMatch = kotlin.math.abs(box1.right - box2.right) < tolerance && 
+                           kotlin.math.abs(box1.top - box2.top) < tolerance
+        val bottomLeftMatch = kotlin.math.abs(box1.left - box2.left) < tolerance && 
+                             kotlin.math.abs(box1.bottom - box2.bottom) < tolerance
+        val bottomRightMatch = kotlin.math.abs(box1.right - box2.right) < tolerance && 
+                              kotlin.math.abs(box1.bottom - box2.bottom) < tolerance
+        
+        return topLeftMatch || topRightMatch || bottomLeftMatch || bottomRightMatch
+    }
+    
+    private fun mergeDetections(detections: List<DetectionResult>): DetectionResult {
+        // Find the detection with the largest bounding box area
+        val largestDetection = detections.maxByOrNull { 
+            (it.boundingBox.right - it.boundingBox.left) * (it.boundingBox.bottom - it.boundingBox.top)
+        } ?: detections[0]
+        
+        // Use the largest bounding box
+        val mergedBox = largestDetection.boundingBox
+        
+        // Use the highest confidence
+        val maxConfidence = detections.maxOfOrNull { it.confidence } ?: 0.5f
+        
+        // Use the class ID from the largest detection
+        val classId = largestDetection.classId
+        
+        return DetectionResult(
+            mergedBox,
+            maxConfidence,
+            classId
+        )
     }
     
     private fun calculateIoU(box1: RectF, box2: RectF): Float {
