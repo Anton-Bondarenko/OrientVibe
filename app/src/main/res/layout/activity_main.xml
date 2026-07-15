@@ -4,100 +4,168 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/gray_light"
+    android:background="@color/background"
     tools:context=".MainActivity">
 
-    <!-- Map Display Area -->
-    <ImageView
-        android:id="@+id/mapImageView"
+    <!-- Info Panel at Top -->
+    <androidx.cardview.widget.CardView
+        android:id="@+id/infoPanel"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_margin="16dp"
+        app:cardCornerRadius="12dp"
+        app:cardElevation="8dp"
+        app:cardBackgroundColor="@color/black"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <TextView
+            android:id="@+id/infoMessage"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="16dp"
+            android:text="выберите старт"
+            android:textSize="16sp"
+            android:textColor="@color/white"
+            android:gravity="center"
+            android:fontFamily="sans-serif-medium" />
+
+    </androidx.cardview.widget.CardView>
+
+    <!-- Map Display Area with Card Style -->
+    <androidx.cardview.widget.CardView
+        android:id="@+id/mapCard"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:layout_margin="8dp"
-        android:background="@android:color/white"
-        android:contentDescription="@string/map_placeholder"
-        android:scaleType="fitCenter"
-        android:src="@android:drawable/ic_menu_mapmode"
+        android:layout_margin="16dp"
+        app:cardCornerRadius="16dp"
+        app:cardElevation="8dp"
+        app:cardBackgroundColor="@color/surface"
         app:layout_constraintBottom_toTopOf="@+id/toolbarContainer"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+        app:layout_constraintTop_toBottomOf="@+id/infoPanel">
 
-    <!-- Progress Container -->
-    <LinearLayout
-        android:id="@+id/progressContainer"
+        <com.github.chrisbanes.photoview.PhotoView
+            android:id="@+id/mapImageView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@color/surface_variant"
+            android:contentDescription="@string/map_placeholder"
+            android:scaleType="fitCenter"
+            android:src="@android:drawable/ic_menu_mapmode" />
+
+    </androidx.cardview.widget.CardView>
+
+    <!-- Progress Container with Modern Card Style -->
+    <androidx.cardview.widget.CardView
+        android:id="@+id/progressCard"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="16dp"
-        android:background="@android:color/white"
-        android:elevation="8dp"
+        android:layout_margin="16dp"
+        app:cardCornerRadius="16dp"
+        app:cardElevation="12dp"
+        app:cardBackgroundColor="@color/surface"
         android:visibility="gone"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent">
 
-        <ProgressBar
-            android:id="@+id/progressBar"
+        <LinearLayout
+            android:id="@+id/progressContainer"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:indeterminate="true" />
+            android:orientation="vertical"
+            android:padding="24dp"
+            android:gravity="center">
 
-        <TextView
-            android:id="@+id/progressText"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:layout_marginTop="8dp"
-            android:text="Подготовка..."
-            android:textSize="14sp"
-            android:visibility="gone" />
+            <ProgressBar
+                android:id="@+id/progressBar"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_gravity="center"
+                android:indeterminate="true"
+                android:indeterminateTint="@color/primary" />
 
-    </LinearLayout>
+            <TextView
+                android:id="@+id/progressText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:layout_marginTop="16dp"
+                android:text="Подготовка..."
+                android:textSize="14sp"
+                android:textColor="@color/text_primary"
+                android:fontFamily="sans-serif-medium"
+                android:visibility="gone" />
 
-    <!-- Bottom Toolbar Container -->
-    <LinearLayout
+        </LinearLayout>
+
+    </androidx.cardview.widget.CardView>
+
+    <!-- Bottom Toolbar Container with Modern Card Style -->
+    <androidx.cardview.widget.CardView
         android:id="@+id/toolbarContainer"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_margin="8dp"
-        android:background="@android:color/white"
-        android:elevation="4dp"
-        android:orientation="horizontal"
-        android:padding="16dp"
+        android:layout_margin="16dp"
+        android:layout_marginBottom="20dp"
+        app:cardCornerRadius="20dp"
+        app:cardElevation="12dp"
+        app:cardBackgroundColor="@color/surface"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent">
 
-        <!-- Camera Button -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/cameraButton"
-            android:layout_width="0dp"
-            android:layout_height="80dp"
-            android:layout_marginEnd="8dp"
-            android:layout_weight="1"
-            android:text="@string/camera_button"
-            android:textSize="16sp"
-            app:cornerRadius="12dp"
-            app:icon="@android:drawable/ic_menu_camera"
-            app:iconGravity="top"
-            app:iconSize="32dp" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:padding="12dp"
+            android:gravity="center">
 
-        <!-- Gallery Button -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/galleryButton"
-            android:layout_width="0dp"
-            android:layout_height="80dp"
-            android:layout_marginStart="8dp"
-            android:layout_weight="1"
-            android:text="@string/gallery_button"
-            android:textSize="16sp"
-            app:cornerRadius="12dp"
-            app:icon="@android:drawable/ic_menu_gallery"
-            app:iconGravity="top"
-            app:iconSize="32dp" />
+            <!-- Camera Button -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/cameraButton"
+                android:layout_width="0dp"
+                android:layout_height="72dp"
+                android:layout_marginEnd="8dp"
+                android:layout_weight="1"
+                android:text="@string/camera_button"
+                android:textSize="15sp"
+                android:textColor="@color/white"
+                android:fontFamily="sans-serif-medium"
+                app:backgroundTint="@color/primary"
+                app:cornerRadius="16dp"
+                app:icon="@android:drawable/ic_menu_camera"
+                app:iconGravity="textStart"
+                app:iconSize="24dp"
+                app:iconPadding="8dp"
+                app:elevation="4dp" />
 
-    </LinearLayout>
+            <!-- Gallery Button -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/galleryButton"
+                android:layout_width="0dp"
+                android:layout_height="72dp"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:text="@string/gallery_button"
+                android:textSize="15sp"
+                android:textColor="@color/white"
+                android:fontFamily="sans-serif-medium"
+                app:backgroundTint="@color/secondary"
+                app:cornerRadius="16dp"
+                app:icon="@android:drawable/ic_menu_gallery"
+                app:iconGravity="textStart"
+                app:iconSize="24dp"
+                app:iconPadding="8dp"
+                app:elevation="4dp" />
+
+        </LinearLayout>
+
+    </androidx.cardview.widget.CardView>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

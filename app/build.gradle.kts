@@ -62,4 +62,7 @@ dependencies {
     
     // ONNX Runtime for object detection
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.17.0")
+    
+    // PhotoView for zooming and panning images
+    implementation("com.github.chrisbanes:PhotoView:2.3.0")
 }

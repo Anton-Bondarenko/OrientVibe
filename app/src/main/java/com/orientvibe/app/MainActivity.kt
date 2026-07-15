@@ -6,16 +6,22 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
+import android.view.Gravity
 import android.view.MotionEvent
-import android.view.ScaleGestureDetector
+import android.view.View
+import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.graphics.drawable.toBitmap
 import androidx.lifecycle.lifecycleScope
+import com.github.chrisbanes.photoview.PhotoViewAttacher
 import com.orientvibe.app.databinding.ActivityMainBinding
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.sqrt
 
 class MainActivity : AppCompatActivity() {
 
@@ -25,19 +31,35 @@ class MainActivity : AppCompatActivity() {
     private val objectDetector = OnnxObjectDetector(this)
     private var modelLoaded = false
     
-    // Zoom variables
-    private var scaleGestureDetector: ScaleGestureDetector? = null
-    private var scaleFactor = 1.0f
-    private var lastTouchX = 0f
-    private var lastTouchY = 0f
-    private var posX = 0f
-    private var posY = 0f
+    // Navigation state
+    private var currentDetections: List<DetectionResult> = emptyList()
+    private var startPoint: Pair<Float, Float>? = null
+    private var selectedControlPoint: DetectionResult? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        
+        // Hide action bar
+        supportActionBar?.hide()
+        
+        // Hide system bars using modern API
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            window.setDecorFitsSystemWindows(false)
+            window.insetsController?.let { controller ->
+                controller.hide(android.view.WindowInsets.Type.statusBars() or android.view.WindowInsets.Type.navigationBars())
+                controller.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = (
+                android.view.View.SYSTEM_UI_FLAG_FULLSCREEN or
+                android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+            )
+        }
 
         // Load ONNX model
         modelLoaded = objectDetector.loadModel("yolov8n.onnx")
@@ -47,7 +69,7 @@ class MainActivity : AppCompatActivity() {
 
         setupManagers()
         setupButtons()
-        setupZoomGestures()
+        setupMapTouchHandler()
     }
 
     private fun setupManagers() {
@@ -72,64 +94,70 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
-    private fun setupZoomGestures() {
-        scaleGestureDetector = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
-            override fun onScale(detector: ScaleGestureDetector): Boolean {
-                scaleFactor *= detector.scaleFactor
-                // Limit scale between 1x and 10x
-                scaleFactor = scaleFactor.coerceIn(1.0f, 10.0f)
-                updateImageTransform()
-                return true
-            }
-        })
-        
-        binding.mapImageView.setOnTouchListener { view, event ->
-            scaleGestureDetector?.onTouchEvent(event)
+    private fun setupMapTouchHandler() {
+        // Use PhotoView's built-in tap listener
+        binding.mapImageView.setOnViewTapListener { view, x, y ->
+            // Get the attacher to convert screen coordinates to image coordinates
+            val attacher = binding.mapImageView.attacher
+            val displayRect = attacher.displayRect
             
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    lastTouchX = event.x
-                    lastTouchY = event.y
-                    true
+            if (displayRect != null) {
+                // Convert screen coordinates to image coordinates
+                val imageX = (x - displayRect.left) / displayRect.width()
+                val imageY = (y - displayRect.top) / displayRect.height()
+                
+                // Check if touch is on a control point
+                val touchedControlPoint = findTouchedControlPoint(x, y)
+                
+                if (touchedControlPoint != null) {
+                    // Handle control point selection
+                    handleControlPointSelection(touchedControlPoint)
+                } else {
+                    // Handle map touch for start point
+                    handleMapTouch(imageX, imageY)
                 }
-                MotionEvent.ACTION_MOVE -> {
-                    if (scaleFactor > 1.0f) {
-                        val dx = event.x - lastTouchX
-                        val dy = event.y - lastTouchY
-                        posX += dx
-                        posY += dy
-                        lastTouchX = event.x
-                        lastTouchY = event.y
-                        updateImageTransform()
-                    }
-                    true
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    // Reset position when zoom is at 1x
-                    if (scaleFactor == 1.0f) {
-                        posX = 0f
-                        posY = 0f
-                        updateImageTransform()
-                    }
-                    true
-                }
-                else -> false
             }
         }
     }
     
-    private fun updateImageTransform() {
-        binding.mapImageView.scaleX = scaleFactor
-        binding.mapImageView.scaleY = scaleFactor
-        binding.mapImageView.translationX = posX
-        binding.mapImageView.translationY = posY
+    private fun findTouchedControlPoint(screenX: Float, screenY: Float): DetectionResult? {
+        val attacher = binding.mapImageView.attacher
+        val displayRect = attacher.displayRect ?: return null
+        
+        for (detection in currentDetections) {
+            if (detection.classId == 0) { // Only control points
+                val box = detection.boundingBox
+                val centerX = (box.left + box.right) / 2
+                val centerY = (box.top + box.bottom) / 2
+                
+                // Convert image coordinates to screen coordinates
+                val screenCenterX = displayRect.left + centerX * displayRect.width()
+                val screenCenterY = displayRect.top + centerY * displayRect.height()
+                
+                // Check if touch is within 30dp of the center
+                val touchRadius = 30 * resources.displayMetrics.density
+                val dx = screenX - screenCenterX
+                val dy = screenY - screenCenterY
+                val distance = sqrt(dx * dx + dy * dy)
+                
+                if (distance <= touchRadius) {
+                    return detection
+                }
+            }
+        }
+        return null
     }
     
-    private fun resetZoom() {
-        scaleFactor = 1.0f
-        posX = 0f
-        posY = 0f
-        updateImageTransform()
+    private fun handleControlPointSelection(controlPoint: DetectionResult) {
+        selectedControlPoint = controlPoint
+        binding.infoMessage.text = "Выбран КП"
+        Toast.makeText(this, "Выбран контрольный пункт", Toast.LENGTH_SHORT).show()
+    }
+    
+    private fun handleMapTouch(x: Float, y: Float) {
+        startPoint = Pair(x, y)
+        binding.infoMessage.text = "Старт установлен"
+        Toast.makeText(this, "Старт установлен: (${"%.2f".format(x)}, ${"%.2f".format(y)})", Toast.LENGTH_SHORT).show()
     }
 
     private fun processImage(uri: Uri) {
@@ -145,18 +173,21 @@ class MainActivity : AppCompatActivity() {
             inputStream?.close()
 
             if (bitmap != null) {
-                // Reset zoom for new image
-                resetZoom()
-                
                 // Show original image first
                 binding.mapImageView.setImageBitmap(bitmap)
+                
+                // Reset navigation state
+                currentDetections = emptyList()
+                startPoint = null
+                selectedControlPoint = null
+                binding.infoMessage.text = "выберите старт"
 
                 // Detect control points in background
                 lifecycleScope.launch {
                     try {
                         // Show progress bar on main thread first
                         withContext(kotlinx.coroutines.Dispatchers.Main) {
-                            binding.progressContainer.visibility = android.view.View.VISIBLE
+                            binding.progressCard.visibility = android.view.View.VISIBLE
                             binding.progressBar.visibility = android.view.View.VISIBLE
                             binding.progressBar.isIndeterminate = true
                             binding.progressText.visibility = android.view.View.VISIBLE
@@ -180,30 +211,22 @@ class MainActivity : AppCompatActivity() {
                             objectDetector.detect(bitmap)
                         }
                         
+                        // Store detections
+                        currentDetections = detections
+                        
                         // Update UI with progress
                         withContext(kotlinx.coroutines.Dispatchers.Main) {
-                            binding.progressText.text = "Отрисовка результатов..."
+                            binding.progressText.text = "Создание кнопок..."
                         }
                         
-                        // Draw detections in background thread
-                        val annotatedBitmap = withContext(kotlinx.coroutines.Dispatchers.Default) {
-                            drawDetections(bitmap, detections)
-                        }
-
-                        // Update UI with annotated image
+                        // Create control point buttons in background thread
                         withContext(kotlinx.coroutines.Dispatchers.Main) {
-                            binding.mapImageView.setImageBitmap(annotatedBitmap)
-                            binding.progressContainer.visibility = android.view.View.GONE
-
-                            Toast.makeText(
-                                this@MainActivity,
-                                "Найдено ${detections.size} контрольных пунктов",
-                                Toast.LENGTH_SHORT
-                            ).show()
+                            createControlPointButtons(detections, bitmap.width, bitmap.height)
+                            binding.progressCard.visibility = android.view.View.GONE
                         }
                     } catch (e: Exception) {
                         withContext(kotlinx.coroutines.Dispatchers.Main) {
-                            binding.progressContainer.visibility = android.view.View.GONE
+                            binding.progressCard.visibility = android.view.View.GONE
                             Toast.makeText(this@MainActivity, "Ошибка: ${e.message}", Toast.LENGTH_SHORT).show()
                         }
                     }
@@ -215,83 +238,39 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Ошибка: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
-
-    private fun drawDetections(bitmap: Bitmap, detections: List<DetectionResult>): Bitmap {
+    
+    private fun createControlPointButtons(detections: List<DetectionResult>, imageWidth: Int, imageHeight: Int) {
+        // Store detection info for drawing
+        currentDetections = detections
+        
+        // Draw circles directly on the current bitmap
+        val currentBitmap = binding.mapImageView.drawable?.toBitmap()
+        if (currentBitmap != null) {
+            val annotatedBitmap = drawControlPointCircles(currentBitmap, detections)
+            binding.mapImageView.setImageBitmap(annotatedBitmap)
+        }
+    }
+    
+    private fun drawControlPointCircles(bitmap: Bitmap, detections: List<DetectionResult>): Bitmap {
         val mutableBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
         val canvas = Canvas(mutableBitmap)
         
-        // Paint for control points (class 0) - green
-        val controlPointPaint = Paint().apply {
-            color = Color.GREEN
+        val paint = Paint().apply {
             style = Paint.Style.STROKE
-            strokeWidth = 5f
-        }
-        
-        // Paint for numbers (class 1) - red
-        val numberPaint = Paint().apply {
+            strokeWidth = 4f
             color = Color.RED
-            style = Paint.Style.STROKE
-            strokeWidth = 5f
         }
         
-        val textPaint = Paint().apply {
-            color = Color.WHITE
-            textSize = 40f
-            style = Paint.Style.FILL
-        }
-        
-        val textBackgroundPaint = Paint().apply {
-            color = Color.BLACK
-            style = Paint.Style.FILL
-        }
-        
-        // Separate detections by class for numbering
-        val controlPointDetections = detections.filter { it.classId == 0 }
-        val numberDetections = detections.filter { it.classId == 1 }
-        
-        var cpCounter = 1
-        var numCounter = 1
-        
-        // Draw all detections sorted by class
         for (detection in detections) {
-            // Select paint based on class
-            val paint = when (detection.classId) {
-                0 -> controlPointPaint  // control_point - green
-                1 -> numberPaint        // number - red
-                else -> controlPointPaint // default
+            if (detection.classId == 0) { // Only control points
+                val box = detection.boundingBox
+                val centerX = (box.left + box.right) / 2
+                val centerY = (box.top + box.bottom) / 2
+                val radius = kotlin.math.min(box.right - box.left, box.bottom - box.top) / 2 * 0.8f
+                
+                // Draw circle directly on the bitmap
+                canvas.drawCircle(centerX, centerY, radius, paint)
             }
-            
-            // Draw bounding box
-            canvas.drawRect(detection.boundingBox, paint)
-            
-            // Draw number and confidence
-            val number = when (detection.classId) {
-                0 -> "КП$cpCounter"
-                1 -> "№$numCounter"
-                else -> ""
-            }
-            
-            if (detection.classId == 0) cpCounter++
-            if (detection.classId == 1) numCounter++
-            
-            val labelText = "$number (${String.format("%.2f", detection.confidence)})"
-            val textWidth = textPaint.measureText(labelText)
-            val textHeight = textPaint.textSize
-            
-            canvas.drawRect(
-                detection.boundingBox.left,
-                detection.boundingBox.top - textHeight - 10f,
-                detection.boundingBox.left + textWidth + 10f,
-                detection.boundingBox.top,
-                textBackgroundPaint
-            )
-            
-            canvas.drawText(
-                labelText,
-                detection.boundingBox.left + 5f,
-                detection.boundingBox.top - 5f,
-                textPaint
-            )
         }
         
         return mutableBitmap
