@@ -47,14 +47,27 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/infoPanel">
 
-        <com.github.chrisbanes.photoview.PhotoView
-            android:id="@+id/mapImageView"
+        <FrameLayout
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:background="@color/surface_variant"
-            android:contentDescription="@string/map_placeholder"
-            android:scaleType="fitCenter"
-            android:src="@android:drawable/ic_menu_mapmode" />
+            android:layout_height="match_parent">
+
+            <com.github.chrisbanes.photoview.PhotoView
+                android:id="@+id/mapImageView"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@color/surface_variant"
+                android:contentDescription="@string/map_placeholder"
+                android:scaleType="fitCenter"
+                android:src="@android:drawable/ic_menu_mapmode" />
+
+            <View
+                android:id="@+id/overlayView"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clickable="false"
+                android:focusable="false" />
+
+        </FrameLayout>
 
     </androidx.cardview.widget.CardView>
 
