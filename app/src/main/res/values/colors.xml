@@ -5,6 +5,7 @@
     <color name="primary_dark">#FF4F46E5</color>
     <color name="primary_light">#FF818CF8</color>
     <color name="secondary">#FF10B981</color>
+    <color name="tertiary">#FF8B5CF6</color>
     <color name="accent">#FFF59E0B</color>
     
     <!-- Background Colors -->

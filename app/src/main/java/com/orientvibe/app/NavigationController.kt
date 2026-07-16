@@ -22,13 +22,24 @@ class NavigationController {
         private set
     var isSettingStart = true // true = setting start, false = setting end
         private set
+    var isRoutePointModificationBlocked = false
+        private set
 
     // Listeners
     private var onNavigationStateChangedListener: (() -> Unit)? = null
     private var onControlPointSelectedListener: ((DetectionResult) -> Unit)? = null
+    private var onNavigationReadyListener: (() -> Unit)? = null
 
     fun setDetections(detections: List<DetectionResult>) {
         this.currentDetections = detections
+    }
+    
+    fun updateDetection(index: Int, detection: DetectionResult) {
+        if (index in currentDetections.indices) {
+            currentDetections = currentDetections.toMutableList().apply {
+                this[index] = detection
+            }
+        }
     }
 
     fun setNavigationStateChangedListener(listener: () -> Unit) {
@@ -37,6 +48,10 @@ class NavigationController {
 
     fun setControlPointSelectedListener(listener: (DetectionResult) -> Unit) {
         this.onControlPointSelectedListener = listener
+    }
+
+    fun setNavigationReadyListener(listener: () -> Unit) {
+        this.onNavigationReadyListener = listener
     }
 
     fun reset() {
@@ -48,12 +63,40 @@ class NavigationController {
         isSettingStart = true
         onNavigationStateChangedListener?.invoke()
     }
+    
+    fun setStartPoint(x: Float, y: Float) {
+        startPoint = Pair(x, y)
+        onNavigationStateChangedListener?.invoke()
+    }
+    
+    fun setEndPoint(x: Float, y: Float) {
+        endPoint = Pair(x, y)
+        onNavigationStateChangedListener?.invoke()
+    }
+    
+    fun setRoutePointModificationBlocked(blocked: Boolean) {
+        isRoutePointModificationBlocked = blocked
+    }
+
+    fun setStartPointMode() {
+        isSettingStart = true
+        onNavigationStateChangedListener?.invoke()
+    }
+
+    fun setEndPointMode() {
+        isSettingStart = false
+        onNavigationStateChangedListener?.invoke()
+    }
 
     fun handleControlPointSelection(
         controlPointIndex: Int,
         imageWidth: Float,
         imageHeight: Float
     ) {
+        if (isRoutePointModificationBlocked) {
+            return
+        }
+        
         val controlPoint = currentDetections[controlPointIndex]
         selectedControlPoint = controlPoint
 
@@ -73,9 +116,18 @@ class NavigationController {
 
         onControlPointSelectedListener?.invoke(controlPoint)
         onNavigationStateChangedListener?.invoke()
+        
+        // Check if navigation is ready (both points set)
+        if (isNavigationReady()) {
+            onNavigationReadyListener?.invoke()
+        }
     }
 
     fun handleMapTouch(x: Float, y: Float) {
+        if (isRoutePointModificationBlocked) {
+            return
+        }
+        
         if (isSettingStart) {
             startPoint = Pair(x, y)
             startControlPointIndex = null
@@ -85,6 +137,11 @@ class NavigationController {
             endControlPointIndex = null
         }
         onNavigationStateChangedListener?.invoke()
+        
+        // Check if navigation is ready (both points set)
+        if (isNavigationReady()) {
+            onNavigationReadyListener?.invoke()
+        }
     }
 
     fun findTouchedControlPoint(
@@ -262,6 +319,25 @@ class NavigationController {
         while (azimuth >= 360f) azimuth -= 360f
 
         return azimuth
+    }
+
+    fun calculateRouteAngle(): Float? {
+        if (startPoint == null || endPoint == null) return null
+
+        val dx = endPoint!!.first - startPoint!!.first
+        val dy = startPoint!!.second - endPoint!!.second // Inverted because y grows downward
+
+        // Calculate route angle in radians (0 = north, clockwise)
+        val routeAngle = atan2(dx, dy)
+
+        // Convert to degrees
+        var routeAngleDegrees = routeAngle * 180f / PI
+
+        // Normalize to 0-360 range
+        while (routeAngleDegrees < 0) routeAngleDegrees += 360f
+        while (routeAngleDegrees >= 360f) routeAngleDegrees -= 360f
+
+        return routeAngleDegrees
     }
 
     companion object {

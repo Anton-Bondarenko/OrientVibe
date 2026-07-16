@@ -136,45 +136,158 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:padding="12dp"
+            android:padding="8dp"
             android:gravity="center">
 
-            <!-- Camera Button -->
+            <!-- Left Arrow Button (for navigation panel) -->
             <com.google.android.material.button.MaterialButton
-                android:id="@+id/cameraButton"
-                android:layout_width="0dp"
+                android:id="@+id/leftArrowButton"
+                android:layout_width="48dp"
                 android:layout_height="72dp"
                 android:layout_marginEnd="8dp"
-                android:layout_weight="1"
-                android:text="@string/camera_button"
-                android:textSize="15sp"
+                android:visibility="gone"
+                android:text="←"
+                android:textSize="24sp"
                 android:textColor="@color/white"
                 android:fontFamily="sans-serif-medium"
-                app:backgroundTint="@color/primary"
+                app:backgroundTint="@color/tertiary"
                 app:cornerRadius="16dp"
-                app:icon="@android:drawable/ic_menu_camera"
-                app:iconGravity="textStart"
-                app:iconSize="24dp"
-                app:iconPadding="8dp"
                 app:elevation="4dp" />
 
-            <!-- Gallery Button -->
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/galleryButton"
+            <!-- Map Loading Panel (Camera/Gallery buttons) -->
+            <LinearLayout
+                android:id="@+id/mapLoadingPanel"
                 android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="horizontal"
+                android:gravity="center">
+
+                <!-- Camera Button -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/cameraButton"
+                    android:layout_width="0dp"
+                    android:layout_height="72dp"
+                    android:layout_marginEnd="8dp"
+                    android:layout_weight="1"
+                    android:text="@string/camera_button"
+                    android:textSize="15sp"
+                    android:textColor="@color/white"
+                    android:fontFamily="sans-serif-medium"
+                    app:backgroundTint="@color/primary"
+                    app:cornerRadius="16dp"
+                    app:icon="@android:drawable/ic_menu_camera"
+                    app:iconGravity="textStart"
+                    app:iconSize="24dp"
+                    app:iconPadding="8dp"
+                    app:elevation="4dp" />
+
+                <!-- Gallery Button -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/galleryButton"
+                    android:layout_width="0dp"
+                    android:layout_height="72dp"
+                    android:layout_marginStart="8dp"
+                    android:layout_weight="1"
+                    android:text="@string/gallery_button"
+                    android:textSize="15sp"
+                    android:textColor="@color/white"
+                    android:fontFamily="sans-serif-medium"
+                    app:backgroundTint="@color/secondary"
+                    app:cornerRadius="16dp"
+                    app:icon="@android:drawable/ic_menu_gallery"
+                    app:iconGravity="textStart"
+                    app:iconSize="24dp"
+                    app:iconPadding="8dp"
+                    app:elevation="4dp" />
+
+            </LinearLayout>
+
+            <!-- Navigation Panel (Start/End point buttons) -->
+            <LinearLayout
+                android:id="@+id/navigationPanel"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="horizontal"
+                android:gravity="center"
+                android:visibility="gone">
+
+                <!-- Set Start Point Button -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/setStartPointButton"
+                    android:layout_width="0dp"
+                    android:layout_height="72dp"
+                    android:layout_marginEnd="8dp"
+                    android:layout_weight="1"
+                    android:text="Старт"
+                    android:textSize="15sp"
+                    android:textColor="@color/white"
+                    android:fontFamily="sans-serif-medium"
+                    app:backgroundTint="@color/primary"
+                    app:cornerRadius="16dp"
+                    app:icon="@android:drawable/ic_menu_mylocation"
+                    app:iconGravity="textStart"
+                    app:iconSize="24dp"
+                    app:iconPadding="8dp"
+                    app:elevation="4dp" />
+
+                <!-- Set End Point Button -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/setEndPointButton"
+                    android:layout_width="0dp"
+                    android:layout_height="72dp"
+                    android:layout_marginStart="8dp"
+                    android:layout_weight="1"
+                    android:text="Финиш"
+                    android:textSize="15sp"
+                    android:textColor="@color/white"
+                    android:fontFamily="sans-serif-medium"
+                    app:backgroundTint="@color/secondary"
+                    app:cornerRadius="16dp"
+                    app:icon="@android:drawable/ic_menu_directions"
+                    app:iconGravity="textStart"
+                    app:iconSize="24dp"
+                    app:iconPadding="8dp"
+                    app:elevation="4dp" />
+
+            </LinearLayout>
+
+            <!-- Navigation Mode Panel (empty for now) -->
+            <LinearLayout
+                android:id="@+id/navigationModePanel"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="horizontal"
+                android:gravity="center"
+                android:visibility="gone">
+
+                <!-- Placeholder for navigation mode buttons -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="72dp"
+                    android:gravity="center"
+                    android:text="Навигация"
+                    android:textSize="16sp"
+                    android:textColor="@color/text_secondary"
+                    android:fontFamily="sans-serif-medium" />
+
+            </LinearLayout>
+
+            <!-- Right Arrow Button (for map loading panel) -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/rightArrowButton"
+                android:layout_width="48dp"
                 android:layout_height="72dp"
                 android:layout_marginStart="8dp"
-                android:layout_weight="1"
-                android:text="@string/gallery_button"
-                android:textSize="15sp"
+                android:visibility="gone"
+                android:text="→"
+                android:textSize="24sp"
                 android:textColor="@color/white"
                 android:fontFamily="sans-serif-medium"
-                app:backgroundTint="@color/secondary"
+                app:backgroundTint="@color/tertiary"
                 app:cornerRadius="16dp"
-                app:icon="@android:drawable/ic_menu_gallery"
-                app:iconGravity="textStart"
-                app:iconSize="24dp"
-                app:iconPadding="8dp"
                 app:elevation="4dp" />
 
         </LinearLayout>

@@ -1,15 +1,17 @@
 package com.orientvibe.app
 
-import android.graphics.BitmapFactory
-import android.net.Uri
+import android.graphics.Bitmap
 import android.os.Bundle
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.graphics.drawable.toBitmap
-import androidx.lifecycle.lifecycleScope
 import com.orientvibe.app.databinding.ActivityMainBinding
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+
+enum class PanelState {
+    MAP_LOADING,
+    NAVIGATION,
+    NAVIGATION_MODE
+}
 
 class MainActivity : AppCompatActivity() {
 
@@ -19,18 +21,17 @@ class MainActivity : AppCompatActivity() {
     private val objectDetector = OnnxObjectDetector(this)
     private var modelLoaded = false
 
-    // Navigation controller
+    // Managers
     private val navigationController = NavigationController()
-
-    // GPS track controller
     private val gpsTrackController = GpsTrackController()
-
-    // Drag state
-    private var isDraggingStart = false
-    private var isDraggingEnd = false
-
-    // Compass state
-    private var compassRotation = 0f
+    private lateinit var panelStateManager: PanelStateManager
+    private lateinit var compassManager: CompassManager
+    private val mapRotationManager = MapRotationManager()
+    private lateinit var detectionCoordinateManager: DetectionCoordinateManager
+    private lateinit var touchHandler: TouchHandler
+    private lateinit var navigationModeManager: NavigationModeManager
+    private lateinit var imageProcessor: ImageProcessor
+    private lateinit var controlPointButtonManager: ControlPointButtonManager
 
     // Overlay view
     private var overlayView: OverlayView? = null
@@ -67,21 +68,83 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Не удалось загрузить модель", Toast.LENGTH_LONG).show()
         }
 
-        setupManagers()
+        // Initialize managers
+        initializeManagers()
+
+        // Setup UI
         setupButtons()
-        setupMapTouchHandler()
         setupOverlayUpdate()
         setupNavigationController()
+        enableMapInteractions()
     }
 
-    private fun setupManagers() {
+    private fun initializeManagers() {
+        // Initialize compass manager
+        compassManager = CompassManager(this)
+        
+        // Initialize panel state manager
+        panelStateManager = PanelStateManager(
+            binding.mapLoadingPanel,
+            binding.navigationPanel,
+            binding.navigationModePanel,
+            binding.leftArrowButton,
+            binding.rightArrowButton
+        ) { panelState ->
+            handlePanelChange(panelState)
+        }
+
+        // Initialize detection coordinate manager
+        detectionCoordinateManager = DetectionCoordinateManager(navigationController)
+
+        // Initialize touch handler
+        touchHandler = TouchHandler(
+            this,
+            navigationController,
+            { onCrossDragStart(it) },
+            { x, y -> onCrossDragMove(x, y) },
+            { onCrossDragEnd() }
+        )
+
+        // Initialize navigation mode manager
+        navigationModeManager = NavigationModeManager(
+            compassManager,
+            detectionCoordinateManager,
+            navigationController,
+            gpsTrackController,
+            { disableMapInteractions() }
+        )
+
+        // Initialize control point button manager
+        controlPointButtonManager = ControlPointButtonManager(
+            binding.progressCard,
+            binding.progressBar,
+            binding.progressText,
+            binding.mapCard,
+            navigationController,
+            compassManager
+        )
+
+        // Initialize image processor
+        imageProcessor = ImageProcessor(
+            this,
+            objectDetector,
+            navigationController,
+            mapRotationManager,
+            detectionCoordinateManager,
+            panelStateManager,
+            controlPointButtonManager,
+            { detections, bitmap -> onImageProcessingComplete(detections, bitmap) }
+        )
+        imageProcessor.setModelLoaded(modelLoaded)
+
+        // Initialize camera and gallery managers
         cameraManager = CameraManager(this) { uri ->
-            processImage(uri)
+            imageProcessor.processImage(uri)
         }
         cameraManager.setupLaunchers()
 
         galleryManager = GalleryManager(this) { uri ->
-            processImage(uri)
+            imageProcessor.processImage(uri)
         }
         galleryManager.setupLaunchers()
     }
@@ -94,65 +157,76 @@ class MainActivity : AppCompatActivity() {
         binding.galleryButton.setOnClickListener {
             galleryManager.requestGallery()
         }
+
+        // Panel switching buttons
+        binding.leftArrowButton.setOnClickListener {
+            panelStateManager.handleLeftArrow()
+        }
+
+        binding.rightArrowButton.setOnClickListener {
+            panelStateManager.handleRightArrow(navigationController.isNavigationReady())
+        }
+
+        // Navigation buttons
+        binding.setStartPointButton.setOnClickListener {
+            navigationController.setStartPointMode()
+            updateInfoMessage()
+        }
+
+        binding.setEndPointButton.setOnClickListener {
+            navigationController.setEndPointMode()
+            updateInfoMessage()
+        }
     }
 
-    private fun setupMapTouchHandler() {
-        // Use PhotoView's built-in tap listener
-        binding.mapImageView.setOnViewTapListener { view, x, y ->
-            // Get the attacher to convert screen coordinates to image coordinates
-            val attacher = binding.mapImageView.attacher
-            val displayRect = attacher.displayRect
+    private fun handlePanelChange(panelState: PanelState) {
+        when (panelState) {
+            PanelState.MAP_LOADING, PanelState.NAVIGATION -> {
+                // Exit navigation mode
+                navigationModeManager.exitNavigationMode(binding.mapImageView)
+                enableMapInteractions()
+            }
 
-            if (displayRect != null) {
-                // Convert screen coordinates to image coordinates
-                val imageX = (x - displayRect.left) / displayRect.width()
-                val imageY = (y - displayRect.top) / displayRect.height()
-
-                // Check if touch is on a control point
-                val drawable = binding.mapImageView.drawable
-                if (drawable != null) {
-                    val touchedControlPointIndex = navigationController.findTouchedControlPoint(
-                        x, y, attacher, drawable, resources.displayMetrics.density
-                    )
-
-                    if (touchedControlPointIndex != null) {
-                        // Handle control point selection
+            PanelState.NAVIGATION_MODE -> {
+                // Enter navigation mode
+                binding.mapCard.post {
+                    val drawable = binding.mapImageView.drawable
+                    if (drawable != null) {
                         val imageWidth = drawable.intrinsicWidth.toFloat()
                         val imageHeight = drawable.intrinsicHeight.toFloat()
-                        navigationController.handleControlPointSelection(
-                            touchedControlPointIndex, imageWidth, imageHeight
-                        )
-                        if (navigationController.isNavigationReady()) {
-                            Toast.makeText(
-                                this,
-                                "Направление установлено на КП",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        }
-                    } else {
-                        // Handle map touch for start point
-                        navigationController.handleMapTouch(imageX, imageY)
-                        if (navigationController.isNavigationReady()) {
-                            Toast.makeText(
-                                this,
-                                "Направление установлено: (${"%.2f".format(imageX)}, ${
-                                    "%.2f".format(
-                                        imageY
-                                    )
-                                })",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        } else {
-                            Toast.makeText(
-                                this,
-                                "Старт установлен: (${"%.2f".format(imageX)}, ${"%.2f".format(imageY)})",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        }
+                        navigationModeManager.enterNavigationMode(binding.mapImageView, imageWidth, imageHeight)
                     }
                 }
+                updateAzimuth()
+                updateInfoMessage()
             }
         }
+    }
+
+    private fun enableMapInteractions() {
+        // Re-enable the tap listener for map interaction
+        binding.mapImageView.setOnViewTapListener { view, x, y ->
+            val attacher = binding.mapImageView.attacher
+            val displayRect = attacher.displayRect
+            val drawable = binding.mapImageView.drawable
+
+            if (displayRect != null && drawable != null) {
+                touchHandler.handleMapTap(
+                    x, y, attacher, drawable, resources.displayMetrics.density
+                )
+            }
+        }
+
+        // Enable PhotoView zoom
+        binding.mapImageView.attacher.setZoomable(true)
+    }
+
+    private fun disableMapInteractions() {
+        // Disable tap listener to prevent map interaction
+        binding.mapImageView.setOnViewTapListener(null)
+
+        // Disable PhotoView zoom
+        binding.mapImageView.attacher.setZoomable(false)
     }
 
     private fun setupOverlayUpdate() {
@@ -172,14 +246,19 @@ class MainActivity : AppCompatActivity() {
         navigationController.setControlPointSelectedListener { controlPoint ->
             // Handle control point selection if needed
         }
+        navigationController.setNavigationReadyListener {
+            // Auto-switch to navigation mode panel when both points are set
+            panelStateManager.switchToNavigationModePanel()
+        }
     }
 
     private fun updateInfoMessage() {
-        binding.infoMessage.text = navigationController.getStatusMessage(compassRotation)
+        binding.infoMessage.text =
+            navigationController.getStatusMessage(compassManager.getCurrentRotation())
     }
 
     private fun updateAzimuth() {
-        val azimuth = navigationController.calculateAzimuth(compassRotation)
+        val azimuth = navigationController.calculateAzimuth(compassManager.getCurrentRotation())
         overlayView?.setAzimuth(azimuth)
     }
 
@@ -211,6 +290,9 @@ class MainActivity : AppCompatActivity() {
 
         // Set GPS track controller
         overlayView?.setGpsTrackController(gpsTrackController)
+        
+        // Set compass manager
+        overlayView?.setCompassManager(compassManager)
 
         // Increase maximum zoom scale for PhotoView
         binding.mapImageView.setMaximumScale(10f)
@@ -222,12 +304,14 @@ class MainActivity : AppCompatActivity() {
     private fun setupOverlayListeners() {
         overlayView?.let { overlay ->
             overlay.setAttacher(binding.mapImageView.attacher)
-            overlay.setOnCompassRotationListener { rotation ->
-                compassRotation = rotation
+            
+            // Set compass rotation listener on compass manager
+            compassManager.setOnCompassRotationListener { rotation ->
                 gpsTrackController.setCompassRotation(rotation)
                 updateAzimuth()
                 updateInfoMessage()
             }
+            
             overlay.setOnMapTouchListener { screenX, screenY ->
                 handleMapTouchFromOverlay(screenX, screenY)
             }
@@ -239,34 +323,25 @@ class MainActivity : AppCompatActivity() {
                         val attacher = binding.mapImageView.attacher
                         val drawable = binding.mapImageView.drawable
                         if (attacher != null && drawable != null) {
-                            val touchedCross = navigationController.findTouchedCross(
+                            touchHandler.handleTouchDown(
                                 event.x,
                                 event.y,
                                 attacher,
                                 drawable,
                                 resources.displayMetrics.density
                             )
-                            if (touchedCross == "start") {
-                                isDraggingStart = true
-                            } else if (touchedCross == "end") {
-                                isDraggingEnd = true
-                            }
                         }
                         false
                     }
 
                     android.view.MotionEvent.ACTION_MOVE -> {
-                        if (isDraggingStart || isDraggingEnd) {
-                            handleCrossDrag(event.x, event.y)
-                            return@setOnTouchListener true
-                        }
+                        touchHandler.handleTouchMove(event.x, event.y)
                         false
                     }
 
                     android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
-                        isDraggingStart = false
-                        isDraggingEnd = false
-                        return@setOnTouchListener true
+                        touchHandler.handleTouchUp()
+                        true
                     }
 
                     else -> false
@@ -275,222 +350,80 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun handleCrossDrag(screenX: Float, screenY: Float) {
+    private fun onCrossDragStart(crossType: String) {
+        // Cross drag started - handled by touchHandler
+    }
+
+    private fun onCrossDragMove(screenX: Float, screenY: Float) {
         val attacher = binding.mapImageView.attacher
-        val displayRect = attacher.displayRect ?: return
-
-        val drawable = binding.mapImageView.drawable ?: return
-        val imageWidth = drawable.intrinsicWidth.toFloat()
-        val imageHeight = drawable.intrinsicHeight.toFloat()
-        val scaleX = displayRect.width() / imageWidth
-        val scaleY = displayRect.height() / imageHeight
-
-        // Convert screen coordinates to image coordinates
-        val imageX = (screenX - displayRect.left) / scaleX / imageWidth
-        val imageY = (screenY - displayRect.top) / scaleY / imageHeight
-
-        if (isDraggingStart) {
-            // Snap to nearest control point if within distance
-            val snappedResult =
-                navigationController.findNearestControlPoint(imageX, imageY, drawable)
-            if (snappedResult != null) {
-                navigationController.updateStartPoint(snappedResult.first, snappedResult.second)
-            } else {
-                navigationController.updateStartPoint(
-                    Pair(
-                        imageX.coerceIn(0f, 1f),
-                        imageY.coerceIn(0f, 1f)
-                    )
-                )
-            }
-        } else if (isDraggingEnd) {
-            // Snap to nearest control point if within distance
-            val snappedResult =
-                navigationController.findNearestControlPoint(imageX, imageY, drawable)
-            if (snappedResult != null) {
-                navigationController.updateEndPoint(snappedResult.first, snappedResult.second)
-            } else {
-                navigationController.updateEndPoint(
-                    Pair(
-                        imageX.coerceIn(0f, 1f),
-                        imageY.coerceIn(0f, 1f)
-                    )
-                )
-            }
+        val drawable = binding.mapImageView.drawable
+        if (attacher != null && drawable != null) {
+            touchHandler.handleCrossDrag(screenX, screenY, attacher, drawable)
         }
+    }
+
+    private fun onCrossDragEnd() {
+        // Cross drag ended
     }
 
     private fun handleMapTouchFromOverlay(screenX: Float, screenY: Float) {
         val attacher = binding.mapImageView.attacher
-        val displayRect = attacher.displayRect ?: return
-
-        val drawable = binding.mapImageView.drawable ?: return
-        val imageWidth = drawable.intrinsicWidth.toFloat()
-        val imageHeight = drawable.intrinsicHeight.toFloat()
-        val scaleX = displayRect.width() / imageWidth
-        val scaleY = displayRect.height() / imageHeight
-
-        // Convert screen coordinates to image coordinates
-        val imageX = (screenX - displayRect.left) / scaleX / imageWidth
-        val imageY = (screenY - displayRect.top) / scaleY / imageHeight
-
-        // Find touched control point
-        val touchedControlPointIndex = navigationController.findTouchedControlPoint(
-            screenX, screenY, attacher, drawable, resources.displayMetrics.density
-        )
-        if (touchedControlPointIndex != null) {
-            navigationController.handleControlPointSelection(
-                touchedControlPointIndex, imageWidth, imageHeight
+        val drawable = binding.mapImageView.drawable
+        if (attacher != null && drawable != null) {
+            touchHandler.handleMapTap(
+                screenX, screenY, attacher, drawable, resources.displayMetrics.density
             )
-            if (navigationController.isNavigationReady()) {
-                Toast.makeText(this, "Направление установлено на КП", Toast.LENGTH_SHORT).show()
-            }
-        } else {
-            navigationController.handleMapTouch(imageX, imageY)
-            if (navigationController.isNavigationReady()) {
-                Toast.makeText(
-                    this,
-                    "Направление установлено: (${"%.2f".format(imageX)}, ${"%.2f".format(imageY)})",
-                    Toast.LENGTH_SHORT
-                ).show()
-            } else {
-                Toast.makeText(
-                    this,
-                    "Старт установлен: (${"%.2f".format(imageX)}, ${"%.2f".format(imageY)})",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
         }
     }
 
-    private fun processImage(uri: Uri) {
-        if (!modelLoaded) {
-            Toast.makeText(this, "Модель не загружена", Toast.LENGTH_SHORT).show()
-            return
-        }
+    private fun onImageProcessingComplete(detections: List<DetectionResult>, bitmap: Bitmap) {
+        // Show original image
+        binding.mapImageView.setImageBitmap(bitmap)
+        binding.infoMessage.text = navigationController.getStatusMessage()
 
-        try {
-            // Load bitmap from URI
-            val inputStream = contentResolver.openInputStream(uri)
-            val bitmap = BitmapFactory.decodeStream(inputStream)
-            inputStream?.close()
+        // Update UI with progress
+        controlPointButtonManager.updateProgress(0, 1, "Создание кнопок...")
 
-            if (bitmap != null) {
-                // Show original image first
-                binding.mapImageView.setImageBitmap(bitmap)
-
-                // Reset navigation state
-                navigationController.reset()
-                binding.infoMessage.text = navigationController.getStatusMessage()
-
-                // Detect control points in background
-                lifecycleScope.launch {
-                    try {
-                        // Show progress bar on main thread first
-                        withContext(kotlinx.coroutines.Dispatchers.Main) {
-                            binding.progressCard.visibility = android.view.View.VISIBLE
-                            binding.progressBar.visibility = android.view.View.VISIBLE
-                            binding.progressBar.isIndeterminate = true
-                            binding.progressText.visibility = android.view.View.VISIBLE
-                            binding.progressText.text = "Подготовка..."
-                        }
-
-                        // Set progress listener
-                        objectDetector.setProgressListener(object : DetectionProgressListener {
-                            override fun onProgressUpdate(
-                                current: Int,
-                                total: Int,
-                                message: String
-                            ) {
-                                runOnUiThread {
-                                    binding.progressBar.isIndeterminate = false
-                                    binding.progressBar.max = total
-                                    binding.progressBar.progress = current
-                                    binding.progressText.text = "$message ($current/$total)"
-                                }
-                            }
-                        })
-
-                        // Run detection on background thread
-                        val detections = withContext(kotlinx.coroutines.Dispatchers.Default) {
-                            objectDetector.detect(bitmap)
-                        }
-
-                        // Store detections
-                        navigationController.setDetections(detections)
-
-                        // Update UI with progress
-                        withContext(kotlinx.coroutines.Dispatchers.Main) {
-                            binding.progressText.text = "Создание кнопок..."
-                        }
-
-                        // Create control point buttons in background thread
-                        withContext(kotlinx.coroutines.Dispatchers.Main) {
-                            createControlPointButtons(detections, bitmap.width, bitmap.height)
-                            binding.progressCard.visibility = android.view.View.GONE
-                        }
-                    } catch (e: Exception) {
-                        withContext(kotlinx.coroutines.Dispatchers.Main) {
-                            binding.progressCard.visibility = android.view.View.GONE
-                            Toast.makeText(
-                                this@MainActivity,
-                                "Ошибка: ${e.message}",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        }
-                    }
-                }
-            } else {
-                Toast.makeText(this, "Ошибка загрузки изображения", Toast.LENGTH_SHORT).show()
-            }
-        } catch (e: Exception) {
-            Toast.makeText(this, "Ошибка: ${e.message}", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun createControlPointButtons(
-        detections: List<DetectionResult>,
-        imageWidth: Int,
-        imageHeight: Int
-    ) {
-        // Store original bitmap for overlay drawing
-        val originalBitmap = binding.mapImageView.drawable?.toBitmap()
-
-        // Setup overlay for drawing
-        setupOverlay()
-
-        // Update overlay with new data
-        overlayView?.setBitmap(originalBitmap!!)
-        overlayView?.setDetections(detections)
-        overlayView?.setNavigationPoints(
-            navigationController.startPoint,
-            navigationController.endPoint
+        // Create control point buttons
+        controlPointButtonManager.createControlPointButtons(
+            detections,
+            bitmap.width,
+            bitmap.height,
+            bitmap
         )
-        overlayView?.setSelectedControlPoints(
-            navigationController.startControlPointIndex,
-            navigationController.endControlPointIndex
-        )
-        overlayView?.setCompassRotation(compassRotation)
+
+        // Set overlay view reference
+        overlayView = controlPointButtonManager.getOverlayView()
+        
+        // Set compass manager in overlay view
+        overlayView?.setCompassManager(compassManager)
+        
+        // Set overlay view in navigation mode manager
+        navigationModeManager.setOverlayView(overlayView)
+
+        // Set overlay view in detection coordinate manager
+        detectionCoordinateManager.setOverlayView(overlayView)
+
+        // Setup overlay listeners
+        setupOverlayListeners()
+
+        // Hide progress
+        controlPointButtonManager.hideProgress()
+
+        // Auto-switch to navigation panel after map load
+        panelStateManager.switchToNavigationPanel()
     }
 
     private fun updateOverlay() {
         val originalBitmap = binding.mapImageView.drawable?.toBitmap() ?: return
-        overlayView?.setBitmap(originalBitmap)
-        overlayView?.setDetections(navigationController.currentDetections)
-        overlayView?.setNavigationPoints(
-            navigationController.startPoint,
-            navigationController.endPoint
-        )
-        overlayView?.setSelectedControlPoints(
-            navigationController.startControlPointIndex,
-            navigationController.endControlPointIndex
-        )
-        overlayView?.setCompassRotation(compassRotation)
-        overlayView?.invalidate()
+        controlPointButtonManager.updateOverlay(originalBitmap)
     }
 
     override fun onDestroy() {
         super.onDestroy()
         objectDetector.close()
+        mapRotationManager.clear()
+        detectionCoordinateManager.clear()
     }
 }
+
