@@ -22,6 +22,9 @@ class MainActivity : AppCompatActivity() {
     // Navigation controller
     private val navigationController = NavigationController()
 
+    // GPS track controller
+    private val gpsTrackController = GpsTrackController()
+
     // Drag state
     private var isDraggingStart = false
     private var isDraggingEnd = false
@@ -164,6 +167,7 @@ class MainActivity : AppCompatActivity() {
             updateOverlay()
             updateInfoMessage()
             updateAzimuth()
+            updateGpsTrack()
         }
         navigationController.setControlPointSelectedListener { controlPoint ->
             // Handle control point selection if needed
@@ -177,6 +181,13 @@ class MainActivity : AppCompatActivity() {
     private fun updateAzimuth() {
         val azimuth = navigationController.calculateAzimuth(compassRotation)
         overlayView?.setAzimuth(azimuth)
+    }
+
+    private fun updateGpsTrack() {
+        val startPoint = navigationController.startPoint
+        if (startPoint != null) {
+            gpsTrackController.setStartPoint(startPoint.first, startPoint.second)
+        }
     }
 
     private fun setupOverlay() {
@@ -198,6 +209,12 @@ class MainActivity : AppCompatActivity() {
         overlayView?.isClickable = true
         frameLayout.addView(overlayView, layoutParams)
 
+        // Set GPS track controller
+        overlayView?.setGpsTrackController(gpsTrackController)
+
+        // Increase maximum zoom scale for PhotoView
+        binding.mapImageView.setMaximumScale(10f)
+
         // Setup overlay listeners
         setupOverlayListeners()
     }
@@ -207,6 +224,7 @@ class MainActivity : AppCompatActivity() {
             overlay.setAttacher(binding.mapImageView.attacher)
             overlay.setOnCompassRotationListener { rotation ->
                 compassRotation = rotation
+                gpsTrackController.setCompassRotation(rotation)
                 updateAzimuth()
                 updateInfoMessage()
             }

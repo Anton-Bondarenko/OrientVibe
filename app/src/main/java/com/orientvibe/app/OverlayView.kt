@@ -24,6 +24,7 @@ class OverlayView(context: Context) : View(context) {
     private var endControlPointIndex: Int? = null
     private var compassRotation: Float = 0f
     private var azimuth: Float? = null
+    private var gpsTrackController: GpsTrackController? = null
     
     private var attacher: PhotoViewAttacher? = null
     private var onCompassRotationListener: ((Float) -> Unit)? = null
@@ -71,6 +72,11 @@ class OverlayView(context: Context) : View(context) {
         this.azimuth = azimuth
         invalidate()
     }
+
+    fun setGpsTrackController(controller: GpsTrackController?) {
+        this.gpsTrackController = controller
+        invalidate()
+    }
     
     fun setAttacher(attacher: PhotoViewAttacher) {
         this.attacher = attacher
@@ -114,6 +120,9 @@ class OverlayView(context: Context) : View(context) {
         
         // Draw crosses
         drawCrosses(canvas, displayRect, imageWidth, imageHeight, scaleX, scaleY)
+
+        // Draw GPS track
+        drawGpsTrack(canvas, displayRect, imageWidth, imageHeight, scaleX, scaleY)
 
         // Draw compass
         drawCompass(canvas, displayRect)
@@ -266,8 +275,9 @@ class OverlayView(context: Context) : View(context) {
     }
     
     private fun drawCompass(canvas: Canvas, displayRect: android.graphics.RectF) {
-        val compassX = displayRect.left + 60f * resources.displayMetrics.density
-        val compassY = displayRect.top + displayRect.height() / 3
+        // Use fixed screen coordinates instead of displayRect-relative coordinates
+        val compassX = 60f * resources.displayMetrics.density
+        val compassY = (height / 3).toFloat()
         val compassSize = 40f * resources.displayMetrics.density
         
         val compassPaint = Paint().apply {
@@ -279,13 +289,42 @@ class OverlayView(context: Context) : View(context) {
         
         // Draw arrow pointing north (rotated by compassRotation)
         val arrowAngle = compassRotation * kotlin.math.PI.toFloat() / 180f
-        val arrowLength = compassSize * 1.6f
-        
+        val arrowLength = compassSize * 3.2f // 2x longer than before (was 1.6f)
+
         // Arrow shaft (no arrow head)
         val arrowEndX = compassX + arrowLength * sin(arrowAngle)
         val arrowEndY = compassY - arrowLength * cos(arrowAngle)
         canvas.drawLine(compassX, compassY, arrowEndX, arrowEndY, compassPaint)
-        
+
+        // Draw two parallel reference lines above compass (don't rotate)
+        val referenceLinePaint = Paint().apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 4f // Same as arrow thickness
+            color = Color.BLUE
+            isAntiAlias = true
+        }
+        val referenceLineY = compassY - compassSize * 2.5f
+        val lineLength = 20f * resources.displayMetrics.density
+        val gap = 4f // Same as arrow thickness
+
+        // Left vertical line
+        canvas.drawLine(
+            compassX - gap,
+            referenceLineY - lineLength / 2,
+            compassX - gap,
+            referenceLineY + lineLength / 2,
+            referenceLinePaint
+        )
+
+        // Right vertical line
+        canvas.drawLine(
+            compassX + gap,
+            referenceLineY - lineLength / 2,
+            compassX + gap,
+            referenceLineY + lineLength / 2,
+            referenceLinePaint
+        )
+
         // Draw "N" label - rotates with the arrow
         canvas.save()
         canvas.rotate(compassRotation, compassX, compassY)
@@ -297,6 +336,40 @@ class OverlayView(context: Context) : View(context) {
         }
         canvas.drawText("N", compassX + 10f * resources.displayMetrics.density, compassY - compassSize - 10f * resources.displayMetrics.density, textPaint)
         canvas.restore()
+    }
+
+    private fun drawGpsTrack(canvas: Canvas, displayRect: android.graphics.RectF, imageWidth: Float, imageHeight: Float, scaleX: Float, scaleY: Float) {
+        val controller = gpsTrackController ?: return
+        val trackPoints = controller.getTrackPoints()
+        if (trackPoints.isEmpty()) return
+
+        val trackPaint = Paint().apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 4f
+            color = Color.BLUE
+            isAntiAlias = true
+        }
+
+        val path = android.graphics.Path()
+        var firstPoint = true
+
+        for (gpsPoint in trackPoints) {
+            val imageCoords = controller.gpsToImageCoordinates(gpsPoint, imageWidth, imageHeight)
+            if (imageCoords != null) {
+                // Convert to screen coordinates
+                val screenX = displayRect.left + imageCoords.first * scaleX
+                val screenY = displayRect.top + imageCoords.second * scaleY
+
+                if (firstPoint) {
+                    path.moveTo(screenX, screenY)
+                    firstPoint = false
+                } else {
+                    path.lineTo(screenX, screenY)
+                }
+            }
+        }
+
+        canvas.drawPath(path, trackPaint)
     }
     
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -318,11 +391,11 @@ class OverlayView(context: Context) : View(context) {
                 isDragging = false
                 
                 // Check if touch is on compass line end (tip)
-                val compassX = displayRect.left + 60f * resources.displayMetrics.density
-                val compassY = displayRect.top + displayRect.height() / 3
+                val compassX = 60f * resources.displayMetrics.density
+                val compassY = (height / 3).toFloat()
                 val compassSize = 40f * resources.displayMetrics.density
                 val arrowAngle = compassRotation * kotlin.math.PI.toFloat() / 180f
-                val arrowLength = compassSize * 1.6f
+                val arrowLength = compassSize * 3.2f // Match the actual drawn length
                 
                 // Calculate line end position (tip)
                 val arrowTipX = compassX + arrowLength * sin(arrowAngle)
@@ -359,8 +432,8 @@ class OverlayView(context: Context) : View(context) {
                 }
                 
                 if (isRotatingCompass) {
-                    val compassX = displayRect.left + 60f * resources.displayMetrics.density
-                    val compassY = displayRect.top + displayRect.height() / 3
+                    val compassX = 60f * resources.displayMetrics.density
+                    val compassY = (height / 3).toFloat()
                     val currentAngle = atan2(screenY - compassY, screenX - compassX)
                     val angleDelta = (currentAngle - compassTouchAngle) * 180f / kotlin.math.PI.toFloat()
                     compassRotation = (compassStartRotation + angleDelta) % 360
