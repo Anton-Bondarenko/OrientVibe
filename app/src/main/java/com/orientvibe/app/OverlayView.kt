@@ -23,6 +23,7 @@ class OverlayView(context: Context) : View(context) {
     private var startControlPointIndex: Int? = null
     private var endControlPointIndex: Int? = null
     private var compassRotation: Float = 0f
+    private var azimuth: Float? = null
     
     private var attacher: PhotoViewAttacher? = null
     private var onCompassRotationListener: ((Float) -> Unit)? = null
@@ -63,6 +64,11 @@ class OverlayView(context: Context) : View(context) {
     
     fun setCompassRotation(rotation: Float) {
         this.compassRotation = rotation
+        invalidate()
+    }
+
+    fun setAzimuth(azimuth: Float?) {
+        this.azimuth = azimuth
         invalidate()
     }
     
@@ -108,7 +114,7 @@ class OverlayView(context: Context) : View(context) {
         
         // Draw crosses
         drawCrosses(canvas, displayRect, imageWidth, imageHeight, scaleX, scaleY)
-        
+
         // Draw compass
         drawCompass(canvas, displayRect)
     }
@@ -222,6 +228,40 @@ class OverlayView(context: Context) : View(context) {
             // Draw X cross
             canvas.drawLine(endX - crossSize, endY - crossSize, endX + crossSize, endY + crossSize, paint)
             canvas.drawLine(endX + crossSize, endY - crossSize, endX - crossSize, endY + crossSize, paint)
+
+            // Draw azimuth text
+            if (azimuth != null) {
+                val textPaint = Paint().apply {
+                    color = Color.GREEN
+                    textSize = 18f * resources.displayMetrics.density
+                    isAntiAlias = true
+                    textAlign = Paint.Align.CENTER
+                    style = Paint.Style.FILL
+                }
+
+                val backgroundPaint = Paint().apply {
+                    color = Color.BLACK
+                    alpha = 180
+                    style = Paint.Style.FILL
+                }
+
+                val azimuthText = "Азимут: ${"%.1f".format(azimuth)}°"
+                val textWidth = textPaint.measureText(azimuthText)
+                val textHeight = textPaint.textSize
+                val padding = 8f * resources.displayMetrics.density
+
+                val textX = endX
+                val textY = endY + crossSize + padding + textHeight
+
+                // Draw background rectangle
+                val bgLeft = textX - textWidth / 2 - padding
+                val bgRight = textX + textWidth / 2 + padding
+                val bgTop = textY - textHeight - padding
+                val bgBottom = textY + padding
+
+                canvas.drawRect(bgLeft, bgTop, bgRight, bgBottom, backgroundPaint)
+                canvas.drawText(azimuthText, textX, textY, textPaint)
+            }
         }
     }
     
