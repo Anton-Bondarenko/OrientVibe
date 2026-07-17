@@ -32,6 +32,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var navigationModeManager: NavigationModeManager
     private lateinit var imageProcessor: ImageProcessor
     private lateinit var controlPointButtonManager: ControlPointButtonManager
+    private val bitmapTransformer = BitmapTransformer()
 
     // Overlay view
     private var overlayView: OverlayView? = null
@@ -111,6 +112,7 @@ class MainActivity : AppCompatActivity() {
             detectionCoordinateManager,
             navigationController,
             gpsTrackController,
+            bitmapTransformer,
             { disableMapInteractions() }
         )
 
@@ -378,6 +380,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun onImageProcessingComplete(detections: List<DetectionResult>, bitmap: Bitmap) {
+        // Store original bitmap in transformer
+        bitmapTransformer.setOriginalBitmap(bitmap)
+        
         // Show original image
         binding.mapImageView.setImageBitmap(bitmap)
         binding.infoMessage.text = navigationController.getStatusMessage()

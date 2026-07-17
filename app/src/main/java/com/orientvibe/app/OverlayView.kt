@@ -292,7 +292,7 @@ class OverlayView(context: Context) : View(context) {
                     color = Color.BLACK
                     alpha = 180
                     style = Paint.Style.FILL
-                }
+               }
 
                 val azimuthText = "Азимут: ${"%.1f".format(azimuth)}°"
                 val textWidth = textPaint.measureText(azimuthText)
