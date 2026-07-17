@@ -43,20 +43,29 @@ class NavigationModeManager(
         
         if (routeAngle != null) {
             // Calculate rotation angle: 360 - route angle
-            rotationAngle = 360f - routeAngle
+            rotationAngle = -routeAngle
         } else {
             android.util.Log.e("NavigationModeManager", "Failed to calculate route angle, using default 90 degrees")
-            rotationAngle = 90f
+            rotationAngle = 0f
         }
         
+        // Temporarily disable image transformations to preserve manual scale
+        // Reset current scale first
+        val attacher = mapImageView.attacher
+//        attacher.scale = 1f
+        
         // Rotate PhotoView by calculated angle
-        mapImageView.rotation = rotationAngle
+        attacher.setRotationTo(rotationAngle)
+        
+        // Set scale range to allow 2x
+        attacher.minimumScale = 0.5f
+        attacher.maximumScale = 10f
         
         // Rotate compass to match map rotation + current compass angle
         val compassRotation = rotationAngle + originalCompassRotation
         compassManager.setRotation(compassRotation)
         overlayView?.setCompassRotation(compassRotation)
-        gpsTrackController.setCompassRotation(compassRotation)
+//        gpsTrackController.setCompassRotation(compassRotation)
         
         // Transform detection coordinates to match rotation
         detectionCoordinateManager.transformCoordinates(
@@ -79,7 +88,8 @@ class NavigationModeManager(
         navigationController.setRoutePointModificationBlocked(false)
         
         // Reset PhotoView rotation
-        mapImageView.rotation = 0f
+        val attacher = mapImageView.attacher
+        attacher.setRotationTo(0f)
         
         // Restore original compass rotation
         compassManager.setRotation(originalCompassRotation)

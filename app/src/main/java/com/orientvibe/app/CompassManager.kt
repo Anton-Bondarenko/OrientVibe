@@ -157,7 +157,7 @@ class CompassManager(private val context: Context) {
                 val arrowTipY = compassY - arrowLength * cos(arrowAngle)
 
                 // Check if touch is near line end
-                val touchRadius = 30f * density
+                val touchRadius = 60f * density
                 val distanceToTip =
                     sqrt((screenX - arrowTipX).pow(2) + (screenY - arrowTipY).pow(2))
                 if (distanceToTip <= touchRadius) {

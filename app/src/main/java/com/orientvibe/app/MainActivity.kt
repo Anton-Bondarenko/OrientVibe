@@ -225,8 +225,8 @@ class MainActivity : AppCompatActivity() {
         // Disable tap listener to prevent map interaction
         binding.mapImageView.setOnViewTapListener(null)
 
-        // Disable PhotoView zoom
-        binding.mapImageView.attacher.setZoomable(false)
+        // Don't disable PhotoView zoom to preserve scale
+        // binding.mapImageView.attacher.setZoomable(false)
     }
 
     private fun setupOverlayUpdate() {
@@ -296,6 +296,7 @@ class MainActivity : AppCompatActivity() {
 
         // Increase maximum zoom scale for PhotoView
         binding.mapImageView.setMaximumScale(10f)
+        binding.mapImageView.setMinimumScale(0.5f)
 
         // Setup overlay listeners
         setupOverlayListeners()
