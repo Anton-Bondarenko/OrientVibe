@@ -24,7 +24,6 @@ class OverlayView(context: Context) : View(context) {
     private val controlPointRenderer = ControlPointRenderer()
     private val routeRenderer = RouteRenderer(context)
     private var compassManager: CompassManager? = null
-    private var isCoordinatesTransformed: Boolean = false
 
     fun setCompassManager(manager: CompassManager) {
         compassManager = manager
@@ -42,18 +41,12 @@ class OverlayView(context: Context) : View(context) {
     }
 
     fun setDetections(detections: List<DetectionResult>) {
-        // Only update detections if coordinates are not currently transformed
-        if (!isCoordinatesTransformed) {
-            controlPointRenderer.setDetections(detections)
-        }
+        controlPointRenderer.setDetections(detections)
         invalidate()
     }
 
     fun setNavigationPoints(start: Pair<Float, Float>?, end: Pair<Float, Float>?) {
-        // Only update navigation points if coordinates are not currently transformed
-        if (!isCoordinatesTransformed) {
-            routeRenderer.setNavigationPoints(start, end)
-        }
+        routeRenderer.setNavigationPoints(start, end)
         invalidate()
     }
 
@@ -108,30 +101,44 @@ class OverlayView(context: Context) : View(context) {
         centerX: Float,
         centerY: Float,
         offsetX: Float = 0f,
-        offsetY: Float = 0f
+        offsetY: Float = 0f,
+        originalImageWidth: Float = 0f,
+        originalImageHeight: Float = 0f,
+        scaleFactor: Float = 1f
     ) {
-        controlPointRenderer.transformCoordinates(rotation, centerX, centerY, offsetX, offsetY)
+        controlPointRenderer.transformCoordinates(rotation, centerX, centerY, offsetX, offsetY, scaleFactor)
         val bitmap = bitmap ?: return
         routeRenderer.transformCoordinates(
+            originalImageWidth,
+            originalImageHeight,
             bitmap.width.toFloat(),
             bitmap.height.toFloat(),
             rotation,
             offsetX,
             offsetY
         )
-        isCoordinatesTransformed = true
     }
 
     fun restoreOriginalOverlayCoordinates() {
         controlPointRenderer.restoreOriginalCoordinates()
         routeRenderer.restoreOriginalPoints()
-        isCoordinatesTransformed = false
     }
 
     fun clearOriginalOverlayCoordinates() {
         controlPointRenderer.clearOriginalDetections()
         routeRenderer.clearOriginalPoints()
-        isCoordinatesTransformed = false
+    }
+
+    fun getTransformedDetections(): List<DetectionResult> {
+        return controlPointRenderer.getDetections()
+    }
+
+    fun getTransformedStartPoint(): Pair<Float, Float>? {
+        return routeRenderer.getStartPoint()
+    }
+
+    fun getTransformedEndPoint(): Pair<Float, Float>? {
+        return routeRenderer.getEndPoint()
     }
 
     override fun onDraw(canvas: Canvas) {

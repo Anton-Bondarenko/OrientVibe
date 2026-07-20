@@ -70,22 +70,26 @@ class BitmapTransformer {
 
     /**
      * Calculate the scale factor based on area change after rotation
-     * @return Scale factor to compensate for image area change
+     * @return Scale factor to compensate for image dimension change (based on area)
      */
     fun getScaleFactor(): Float {
         val original = originalBitmap ?: return 1f
         val transformed = transformedBitmap ?: return 1f
         if (rotationAngle == 0f) return 1f
 
-        val originalArea = original.width.toFloat() * original.height.toFloat()
-        val transformedArea = transformed.width.toFloat() * transformed.height.toFloat()
+        val originalWidth = original.width.toFloat()
+        val originalHeight = original.height.toFloat()
+        val transformedWidth = transformed.width.toFloat()
+        val transformedHeight = transformed.height.toFloat()
 
-        // Scale factor = sqrt(originalArea / transformedArea) to compensate for area change
-        val scaleFactor = kotlin.math.sqrt(originalArea / transformedArea).toFloat()
+        // Calculate scale factor based on area change
+        val originalArea = originalWidth * originalHeight
+        val transformedArea = transformedWidth * transformedHeight
+        val scaleFactor = kotlin.math.sqrt(transformedArea / originalArea)
 
         android.util.Log.d(
             "BitmapTransformer",
-            "Scale factor: originalArea=$originalArea, transformedArea=$transformedArea, scaleFactor=$scaleFactor"
+            "Scale factor: originalWidth=$originalWidth, originalHeight=$originalHeight, transformedWidth=$transformedWidth, transformedHeight=$transformedHeight, originalArea=$originalArea, transformedArea=$transformedArea, scaleFactor=$scaleFactor"
         )
 
         return scaleFactor

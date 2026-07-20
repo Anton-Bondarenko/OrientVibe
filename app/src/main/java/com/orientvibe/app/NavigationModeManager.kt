@@ -14,6 +14,7 @@ class NavigationModeManager(
         private set
     private var originalStartPoint: Pair<Float, Float>? = null
     private var originalEndPoint: Pair<Float, Float>? = null
+    private var originalDetections: List<DetectionResult>? = null
     private var originalCompassRotation: Float = 0f
     private var wasManuallyRotated: Boolean = false
     private var overlayView: OverlayView? = null
@@ -31,6 +32,15 @@ class NavigationModeManager(
         // Save original route points
         originalStartPoint = navigationController.startPoint
         originalEndPoint = navigationController.endPoint
+
+        // Save original detections
+        originalDetections = navigationController.currentDetections.map { detection ->
+            DetectionResult(
+                android.graphics.RectF(detection.boundingBox),
+                detection.confidence,
+                detection.classId
+            )
+        }
 
         // Save original compass rotation
         originalCompassRotation = compassManager.getCurrentRotation()
@@ -70,7 +80,7 @@ class NavigationModeManager(
         val (offsetX, offsetY) = bitmapTransformer.getCenterOffset()
         android.util.Log.d("NavigationModeManager", "Center offset: $offsetX, $offsetY")
 
-        // Get scale factor based on area change
+        // Get scale factor based on width and height change
         val scaleFactor = bitmapTransformer.getScaleFactor()
         android.util.Log.d("NavigationModeManager", "Scale factor: $scaleFactor")
 
@@ -83,11 +93,17 @@ class NavigationModeManager(
             imageWidth / 2f,
             imageHeight / 2f,
             offsetX,
-            offsetY
+            offsetY,
+            imageWidth,
+            imageHeight,
+            scaleFactor
         )
 
         // Apply scale factor to overlay elements
         overlayView?.setScaleFactor(scaleFactor)
+
+        // Update navigationController with transformed coordinates
+        updateNavigationControllerWithTransformedCoordinates()
 
         onNavigationModeEntered()
         android.util.Log.d("NavigationModeManager", "Navigation mode entered")
@@ -120,15 +136,16 @@ class NavigationModeManager(
         // Restore original overlay coordinates
         overlayView?.restoreOriginalOverlayCoordinates()
 
-        // Restore original route points in navigation controller
+        // Restore original coordinates in navigationController
+        if (originalDetections != null) {
+            navigationController.setDetections(originalDetections!!)
+        }
         if (originalStartPoint != null && originalEndPoint != null) {
             navigationController.setStartPoint(
                 originalStartPoint!!.first,
                 originalStartPoint!!.second
             )
             navigationController.setEndPoint(originalEndPoint!!.first, originalEndPoint!!.second)
-            originalStartPoint = null
-            originalEndPoint = null
         }
 
         // Reset scale factor
@@ -137,9 +154,30 @@ class NavigationModeManager(
         // Clear original overlay coordinates
         overlayView?.clearOriginalOverlayCoordinates()
 
+        // Clear saved originals
+        originalDetections = null
+        originalStartPoint = null
+        originalEndPoint = null
+
         // Reset rotation angle
         rotationAngle = 0f
 
         android.util.Log.d("NavigationModeManager", "Navigation mode exited")
+    }
+
+    private fun updateNavigationControllerWithTransformedCoordinates() {
+        // Update detections in navigationController with transformed coordinates
+        val transformedDetections = overlayView?.getTransformedDetections()
+        if (transformedDetections != null) {
+            navigationController.setDetections(transformedDetections)
+        }
+
+        // Update route points in navigationController with transformed coordinates
+        val transformedStartPoint = overlayView?.getTransformedStartPoint()
+        val transformedEndPoint = overlayView?.getTransformedEndPoint()
+        if (transformedStartPoint != null && transformedEndPoint != null) {
+            navigationController.setStartPoint(transformedStartPoint.first, transformedStartPoint.second)
+            navigationController.setEndPoint(transformedEndPoint.first, transformedEndPoint.second)
+        }
     }
 }

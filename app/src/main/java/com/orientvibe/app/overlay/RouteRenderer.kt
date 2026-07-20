@@ -35,18 +35,29 @@ class RouteRenderer(private val context: Context) {
     }
 
     fun transformCoordinates(
-        imageWidth: Float,
-        imageHeight: Float,
+        originalImageWidth: Float,
+        originalImageHeight: Float,
+        transformedImageWidth: Float,
+        transformedImageHeight: Float,
         rotation: Float,
         offsetX: Float = 0f,
         offsetY: Float = 0f
     ) {
-        val centerX = imageWidth / 2f
-        val centerY = imageHeight / 2f
+        val centerX = originalImageWidth / 2f
+        val centerY = originalImageHeight / 2f
+
+        android.util.Log.d("RouteRenderer", "transformCoordinates - rotation: $rotation, offset: ($offsetX, $offsetY)")
+        android.util.Log.d("RouteRenderer", "originalImageWidth: $originalImageWidth, originalImageHeight: $originalImageHeight")
+        android.util.Log.d("RouteRenderer", "transformedImageWidth: $transformedImageWidth, transformedImageHeight: $transformedImageHeight")
+        android.util.Log.d("RouteRenderer", "centerX: $centerX, centerY: $centerY")
+
+        android.util.Log.d("RouteRenderer", "originalStartPoint: $originalStartPoint")
+        android.util.Log.d("RouteRenderer", "originalEndPoint: $originalEndPoint")
 
         startPoint = originalStartPoint?.let { (x, y) ->
-            val pixelX = x * imageWidth
-            val pixelY = y * imageHeight
+            val pixelX = x * originalImageWidth
+            val pixelY = y * originalImageHeight
+            android.util.Log.d("RouteRenderer", "Start point normalized: ($x, $y), pixel (original): ($pixelX, $pixelY)")
             val (transformedX, transformedY) = CoordinateTransformer.transformPoint(
                 pixelX,
                 pixelY,
@@ -56,12 +67,17 @@ class RouteRenderer(private val context: Context) {
                 offsetX,
                 offsetY
             )
-            transformedX / imageWidth to transformedY / imageHeight
+            android.util.Log.d("RouteRenderer", "Start point transformed pixel: ($transformedX, $transformedY)")
+            val normalizedX = transformedX / transformedImageWidth
+            val normalizedY = transformedY / transformedImageHeight
+            android.util.Log.d("RouteRenderer", "Start point transformed normalized: ($normalizedX, $normalizedY)")
+            normalizedX to normalizedY
         }
 
         endPoint = originalEndPoint?.let { (x, y) ->
-            val pixelX = x * imageWidth
-            val pixelY = y * imageHeight
+            val pixelX = x * originalImageWidth
+            val pixelY = y * originalImageHeight
+            android.util.Log.d("RouteRenderer", "End point normalized: ($x, $y), pixel (original): ($pixelX, $pixelY)")
             val (transformedX, transformedY) = CoordinateTransformer.transformPoint(
                 pixelX,
                 pixelY,
@@ -71,8 +87,15 @@ class RouteRenderer(private val context: Context) {
                 offsetX,
                 offsetY
             )
-            transformedX / imageWidth to transformedY / imageHeight
+            android.util.Log.d("RouteRenderer", "End point transformed pixel: ($transformedX, $transformedY)")
+            val normalizedX = transformedX / transformedImageWidth
+            val normalizedY = transformedY / transformedImageHeight
+            android.util.Log.d("RouteRenderer", "End point transformed normalized: ($normalizedX, $normalizedY)")
+            normalizedX to normalizedY
         }
+
+        android.util.Log.d("RouteRenderer", "Final startPoint: $startPoint")
+        android.util.Log.d("RouteRenderer", "Final endPoint: $endPoint")
     }
 
     fun restoreOriginalPoints() {

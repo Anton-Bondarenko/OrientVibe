@@ -42,7 +42,8 @@ class ControlPointRenderer {
         centerX: Float,
         centerY: Float,
         offsetX: Float = 0f,
-        offsetY: Float = 0f
+        offsetY: Float = 0f,
+        scaleFactor: Float = 1f
     ) {
         detections = detections.mapIndexed { index, detection ->
             val transformedBox = CoordinateTransformer.transformBoundingBox(
@@ -51,7 +52,8 @@ class ControlPointRenderer {
                 centerX,
                 centerY,
                 offsetX,
-                offsetY
+                offsetY,
+                scaleFactor
             )
             DetectionResult(transformedBox, detection.confidence, detection.classId)
         }
@@ -70,6 +72,8 @@ class ControlPointRenderer {
     fun clearOriginalDetections() {
         originalDetections = emptyList()
     }
+
+    fun getDetections(): List<DetectionResult> = detections
 
     fun draw(
         canvas: Canvas,
@@ -100,7 +104,7 @@ class ControlPointRenderer {
                 // Convert to screen coordinates
                 val screenCenterX = displayRect.left + centerX * scaleX
                 val screenCenterY = displayRect.top + centerY * scaleY
-                val screenRadius = radius * scaleX * scaleFactor
+                val screenRadius = radius * scaleX
 
                 canvas.drawCircle(screenCenterX, screenCenterY, screenRadius, paint)
             }

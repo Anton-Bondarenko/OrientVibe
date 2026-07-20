@@ -41,12 +41,14 @@ object CoordinateTransformer {
     
     /**
      * Transform a bounding box around a center with rotation and offset
+     * Only transforms the center point, keeping sides parallel to axes
      * @param box Bounding box to transform
      * @param rotation Rotation angle in degrees
      * @param centerX Center X coordinate
      * @param centerY Center Y coordinate
      * @param offsetX Offset X after rotation
      * @param offsetY Offset Y after rotation
+     * @param scaleFactor Scale factor to apply to width and height
      * @return Transformed bounding box (normalized)
      */
     fun transformBoundingBox(
@@ -55,18 +57,34 @@ object CoordinateTransformer {
         centerX: Float,
         centerY: Float,
         offsetX: Float = 0f,
-        offsetY: Float = 0f
+        offsetY: Float = 0f,
+        scaleFactor: Float = 1f
     ): RectF {
-        // Transform each corner of the bounding box
-        val (newLeft, newTop) = transformPoint(box.left, box.top, rotation, centerX, centerY, offsetX, offsetY)
-        val (newRight, newBottom) = transformPoint(box.right, box.bottom, rotation, centerX, centerY, offsetX, offsetY)
-        
-        // Normalize bounding box (ensure left < right and top < bottom)
-        val normalizedLeft = kotlin.math.min(newLeft, newRight)
-        val normalizedRight = kotlin.math.max(newLeft, newRight)
-        val normalizedTop = kotlin.math.min(newTop, newBottom)
-        val normalizedBottom = kotlin.math.max(newTop, newBottom)
-        
-        return RectF(normalizedLeft, normalizedTop, normalizedRight, normalizedBottom)
+        // Calculate center of bounding box
+        val boxCenterX = (box.left + box.right) / 2f
+        val boxCenterY = (box.top + box.bottom) / 2f
+
+        // Transform only the center point
+        val (transformedCenterX, transformedCenterY) = transformPoint(
+            boxCenterX,
+            boxCenterY,
+            rotation,
+            centerX,
+            centerY,
+            offsetX,
+            offsetY
+        )
+
+        // Scale width and height by scaleFactor
+        val width = (box.right - box.left) * scaleFactor
+        val height = (box.bottom - box.top) * scaleFactor
+
+        // Create new bounding box with transformed center and scaled size
+        return RectF(
+            transformedCenterX - width / 2f,
+            transformedCenterY - height / 2f,
+            transformedCenterX + width / 2f,
+            transformedCenterY + height / 2f
+        )
     }
 }
