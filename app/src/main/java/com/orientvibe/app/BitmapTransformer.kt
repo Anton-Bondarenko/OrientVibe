@@ -48,18 +48,14 @@ class BitmapTransformer {
      */
     fun getCenterOffset(): Pair<Float, Float> {
         val original = originalBitmap ?: return 0f to 0f
+        val transformed = transformedBitmap ?: return 0f to 0f
         if (rotationAngle == 0f) return 0f to 0f
 
         val width = original.width.toFloat()
         val height = original.height.toFloat()
 
-        // Calculate new bounding box dimensions after rotation
-        val radians = abs(rotationAngle) * kotlin.math.PI / 180.0
-        val cos = cos(radians)
-        val sin = sin(radians)
-
-        val newWidth = abs(width * cos + height * sin)
-        val newHeight = abs(width * sin + height * cos)
+        val newWidth = transformed.width.toFloat()
+        val newHeight = transformed.height.toFloat()
 
         // When bitmap is aligned to bottom edge, calculate center offset
         // The bottom corner of the rotated bounding box touches the bottom edge
@@ -69,7 +65,7 @@ class BitmapTransformer {
 
         android.util.Log.d("BitmapTransformer", "Center offset: width=$width, height=$height, newWidth=$newWidth, newHeight=$newHeight, offsetX=$offsetX, offsetY=$offsetY")
 
-        return offsetX.toFloat() to offsetY.toFloat()
+        return offsetX to offsetY
     }
 
     /**
