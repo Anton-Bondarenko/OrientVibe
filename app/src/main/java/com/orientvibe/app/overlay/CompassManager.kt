@@ -1,4 +1,4 @@
-package com.orientvibe.app
+package com.orientvibe.app.overlay
 
 import android.content.Context
 import android.graphics.Canvas

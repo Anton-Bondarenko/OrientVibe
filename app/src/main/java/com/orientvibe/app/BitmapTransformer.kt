@@ -2,9 +2,6 @@ package com.orientvibe.app
 
 import android.graphics.Bitmap
 import android.graphics.Matrix
-import kotlin.math.abs
-import kotlin.math.cos
-import kotlin.math.sin
 
 class BitmapTransformer {
     private var originalBitmap: Bitmap? = null
@@ -63,9 +60,35 @@ class BitmapTransformer {
         val offsetX = (newWidth - width) / 2f
         val offsetY = (newHeight - height) / 2f
 
-        android.util.Log.d("BitmapTransformer", "Center offset: width=$width, height=$height, newWidth=$newWidth, newHeight=$newHeight, offsetX=$offsetX, offsetY=$offsetY")
+        android.util.Log.d(
+            "BitmapTransformer",
+            "Center offset: width=$width, height=$height, newWidth=$newWidth, newHeight=$newHeight, offsetX=$offsetX, offsetY=$offsetY"
+        )
 
         return offsetX to offsetY
+    }
+
+    /**
+     * Calculate the scale factor based on area change after rotation
+     * @return Scale factor to compensate for image area change
+     */
+    fun getScaleFactor(): Float {
+        val original = originalBitmap ?: return 1f
+        val transformed = transformedBitmap ?: return 1f
+        if (rotationAngle == 0f) return 1f
+
+        val originalArea = original.width.toFloat() * original.height.toFloat()
+        val transformedArea = transformed.width.toFloat() * transformed.height.toFloat()
+
+        // Scale factor = sqrt(originalArea / transformedArea) to compensate for area change
+        val scaleFactor = kotlin.math.sqrt(originalArea / transformedArea).toFloat()
+
+        android.util.Log.d(
+            "BitmapTransformer",
+            "Scale factor: originalArea=$originalArea, transformedArea=$transformedArea, scaleFactor=$scaleFactor"
+        )
+
+        return scaleFactor
     }
 
     /**

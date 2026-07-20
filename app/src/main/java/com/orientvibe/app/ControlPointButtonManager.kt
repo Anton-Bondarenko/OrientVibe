@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.widget.FrameLayout
 import android.widget.ProgressBar
 import android.widget.TextView
+import com.orientvibe.app.overlay.CompassManager
 
 class ControlPointButtonManager(
     private val progressCard: android.view.View,

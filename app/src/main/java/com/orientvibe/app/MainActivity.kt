@@ -6,6 +6,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.graphics.drawable.toBitmap
 import com.orientvibe.app.databinding.ActivityMainBinding
+import com.orientvibe.app.overlay.CompassManager
 
 enum class PanelState {
     MAP_LOADING,
@@ -27,7 +28,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var panelStateManager: PanelStateManager
     private lateinit var compassManager: CompassManager
     private val mapRotationManager = MapRotationManager()
-    private lateinit var detectionCoordinateManager: DetectionCoordinateManager
     private lateinit var touchHandler: TouchHandler
     private lateinit var navigationModeManager: NavigationModeManager
     private lateinit var imageProcessor: ImageProcessor
@@ -94,9 +94,6 @@ class MainActivity : AppCompatActivity() {
             handlePanelChange(panelState)
         }
 
-        // Initialize detection coordinate manager
-        detectionCoordinateManager = DetectionCoordinateManager(navigationController)
-
         // Initialize touch handler
         touchHandler = TouchHandler(
             this,
@@ -109,7 +106,6 @@ class MainActivity : AppCompatActivity() {
         // Initialize navigation mode manager
         navigationModeManager = NavigationModeManager(
             compassManager,
-            detectionCoordinateManager,
             navigationController,
             gpsTrackController,
             bitmapTransformer,
@@ -132,7 +128,6 @@ class MainActivity : AppCompatActivity() {
             objectDetector,
             navigationController,
             mapRotationManager,
-            detectionCoordinateManager,
             panelStateManager,
             controlPointButtonManager,
             { detections, bitmap -> onImageProcessingComplete(detections, bitmap) }
@@ -407,8 +402,8 @@ class MainActivity : AppCompatActivity() {
         // Set overlay view in navigation mode manager
         navigationModeManager.setOverlayView(overlayView)
 
-        // Set overlay view in detection coordinate manager
-        detectionCoordinateManager.setOverlayView(overlayView)
+        // Save original overlay coordinates
+        overlayView?.saveOriginalOverlayCoordinates()
 
         // Setup overlay listeners
         setupOverlayListeners()
@@ -429,7 +424,6 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         objectDetector.close()
         mapRotationManager.clear()
-        detectionCoordinateManager.clear()
     }
 }
 

@@ -15,7 +15,6 @@ class ImageProcessor(
     private val objectDetector: OnnxObjectDetector,
     private val navigationController: NavigationController,
     private val mapRotationManager: MapRotationManager,
-    private val detectionCoordinateManager: DetectionCoordinateManager,
     private val panelStateManager: PanelStateManager,
     private val controlPointButtonManager: ControlPointButtonManager,
     private val onProcessingComplete: (List<DetectionResult>, Bitmap) -> Unit
@@ -87,9 +86,6 @@ class ImageProcessor(
 
                     // Store detections
                     navigationController.setDetections(detections)
-                    
-                    // Save original detection coordinates after setting them
-                    detectionCoordinateManager.saveOriginalDetections()
 
                     // Notify completion
                     onProcessingComplete(detections, bitmap)
