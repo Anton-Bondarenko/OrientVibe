@@ -105,6 +105,9 @@ class NavigationModeManager(
         // Update navigationController with transformed coordinates
         updateNavigationControllerWithTransformedCoordinates()
 
+        // Auto-zoom to fit route and center it
+        zoomToFitRoute(mapImageView, rotatedBitmap)
+
         onNavigationModeEntered()
         android.util.Log.d("NavigationModeManager", "Navigation mode entered")
     }
@@ -179,5 +182,62 @@ class NavigationModeManager(
             navigationController.setStartPoint(transformedStartPoint.first, transformedStartPoint.second)
             navigationController.setEndPoint(transformedEndPoint.first, transformedEndPoint.second)
         }
+    }
+
+    private fun zoomToFitRoute(mapImageView: PhotoView, bitmap: android.graphics.Bitmap?) {
+        val startPoint = navigationController.startPoint
+        val endPoint = navigationController.endPoint
+
+        if (startPoint == null || endPoint == null || bitmap == null) {
+            android.util.Log.w("NavigationModeManager", "Cannot zoom to fit route: points or bitmap missing")
+            return
+        }
+
+        val bitmapWidth = bitmap.width.toFloat()
+        val bitmapHeight = bitmap.height.toFloat()
+
+        // Convert normalized coordinates to pixel coordinates
+        val startPixelX = startPoint.first * bitmapWidth
+        val startPixelY = startPoint.second * bitmapHeight
+        val endPixelX = endPoint.first * bitmapWidth
+        val endPixelY = endPoint.second * bitmapHeight
+
+        // Calculate route bounding box
+        val routeMinX = minOf(startPixelX, endPixelX)
+        val routeMaxX = maxOf(startPixelX, endPixelX)
+        val routeMinY = minOf(startPixelY, endPixelY)
+        val routeMaxY = maxOf(startPixelY, endPixelY)
+
+        val routeWidth = routeMaxX - routeMinX
+        val routeHeight = routeMaxY - routeMinY
+
+        // Add padding (2% of route size)
+        val paddingX = routeWidth * 0.02f
+        val paddingY = routeHeight * 0.02f
+
+        // Calculate scale to fit route with padding
+        val scaleX = bitmapWidth / (routeWidth + paddingX)
+        val scaleY = bitmapHeight / (routeHeight + paddingY)
+        val targetScale = minOf(scaleX, scaleY)
+
+        // Apply min and max scale limits from PhotoView
+        val attacher = mapImageView.attacher
+        attacher.maximumScale = 15f
+        attacher.minimumScale = 0.3f
+        val minScale = attacher.minimumScale
+        val maxScale = attacher.maximumScale
+        val finalScale = targetScale.coerceIn(minScale, maxScale)
+
+        android.util.Log.d("NavigationModeManager", "Zoom to fit route: routeWidth=$routeWidth, routeHeight=$routeHeight, targetScale=$targetScale, minScale=$minScale, maxScale=$maxScale, finalScale=$finalScale")
+
+        // Calculate center of route in normalized coordinates
+        val routeCenterX = (routeMinX + routeMaxX) / 2f / bitmapWidth
+        val routeCenterY = (routeMinY + routeMaxY) / 2f / bitmapHeight
+
+        // Set scale with focal point at route center
+        // Convert normalized center to pixel coordinates
+        val focalX = routeCenterX * mapImageView.width
+        val focalY = routeCenterY * mapImageView.height
+        attacher.setScale(finalScale, focalX, focalY, true)
     }
 }
